@@ -360,11 +360,26 @@ class PixieClient:
         return None
 
     async def _enable_notify_manual(self, char) -> None:
+        """Enable Telink-style notifications without a CCCD descriptor.
+
+        This is a macOS CoreBluetooth workaround — Telink devices lack a
+        CCCD so start_notify fails.  On Linux/BlueZ start_notify should
+        work and this path is never reached.
+        """
+        import sys
+
         assert self._client is not None
         _LOGGER.debug("Enabling notifications via characteristic write (handle %d)", char.handle)
         await self._client.write_gatt_char(char, b"\x01", response=True)
-        delegate = self._client._backend._delegate
-        delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
+
+        if sys.platform == "darwin":
+            delegate = self._client._backend._delegate
+            delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
+        else:
+            _LOGGER.warning(
+                "Manual notify fallback on non-macOS platform — "
+                "notifications may not work. Please report this issue."
+            )
 
     def _on_notification_raw(self, data: bytearray) -> None:
         self._on_notification(0, data)
