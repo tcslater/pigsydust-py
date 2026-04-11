@@ -324,6 +324,15 @@ class PixieClient:
             await self._client.write_gatt_char(CHAR_CMD_UUID, packet, response=False)
 
     async def _send_with_retry(self, plaintext: bytes) -> None:
+        # In HA-managed mode, don't retry internally — let the
+        # coordinator handle reconnection on the next poll cycle.
+        if not self._owns_client:
+            if not self.is_connected:
+                raise ConnectionError("BLE connection lost")
+            await self._send(plaintext)
+            return
+
+        # Standalone mode: retry with reconnect.
         for attempt in range(_MAX_RECONNECT_ATTEMPTS):
             try:
                 await self._ensure_connected()
