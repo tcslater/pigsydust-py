@@ -221,8 +221,14 @@ class PixieClient:
             except asyncio.CancelledError:
                 pass
             self._heartbeat_task = None
-        self._client = None
 
+        # Only reconnect in standalone mode (we own the BleakClient).
+        # In HA-managed mode, the caller is responsible for reconnection.
+        if not self._owns_client:
+            self._client = None
+            raise ConnectionError("HA-managed BLE connection lost — integration will retry")
+
+        self._client = None
         await self.connect()
         await self.login(self._mesh_name, self._mesh_password)
         _LOGGER.info("Reconnected to %s", self._address)
@@ -287,7 +293,14 @@ class PixieClient:
         self, callback: Callable[[DeviceStatus], None]
     ) -> Callable[[], None]:
         self._status_callbacks.append(callback)
-        return lambda: self._status_callbacks.remove(callback)
+
+        def _unsubscribe():
+            try:
+                self._status_callbacks.remove(callback)
+            except ValueError:
+                pass
+
+        return _unsubscribe
 
     # ------------------------------------------------------------------
     # Internals
