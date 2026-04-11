@@ -2,7 +2,7 @@
 
 from Crypto.Cipher import AES
 
-from piggsydust.crypto import (
+from pigsydust.crypto import (
     LoginError,
     TagMismatchError,
     _pad16,

@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "piggsydust"
+name = "pigsydust"
 version = "0.1.0"
 description = "Python library for controlling SAL Pixie BLE mesh wall switches"
 readme = "README.md"
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/piggsydust"]
+packages = ["src/pigsydust"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

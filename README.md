@@ -1,18 +1,18 @@
-# piggsydust
+# pigsydust
 
 Python library for controlling SAL Pixie BLE mesh wall switches.
 
 ## Installation
 
 ```
-pip install piggsydust
+pip install pigsydust
 ```
 
 ## Quick Start
 
 ```python
 import asyncio
-from piggsydust import PixieClient
+from pigsydust import PixieClient
 
 async def main():
     client = PixieClient("AA:BB:CC:DD:EE:FF")

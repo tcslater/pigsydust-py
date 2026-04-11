@@ -1,4 +1,4 @@
-"""Standalone hardware test for piggsydust.
+"""Standalone hardware test for pigsydust.
 
 Usage:
     python examples/test_hardware.py <config.toml>
@@ -17,7 +17,7 @@ import tomllib
 
 from bleak import BleakScanner
 
-from piggsydust import PixieClient
+from pigsydust import PixieClient
 
 logging.basicConfig(level=logging.DEBUG)
 

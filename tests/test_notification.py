@@ -2,8 +2,8 @@
 
 import struct
 
-from piggsydust.crypto import command_nonce, derive_session_key, encrypt
-from piggsydust.notification import (
+from pigsydust.crypto import command_nonce, derive_session_key, encrypt
+from pigsydust.notification import (
     DeviceStatus,
     Notification,
     decrypt_notification,

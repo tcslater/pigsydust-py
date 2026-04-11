@@ -2,8 +2,8 @@
 
 import struct
 
-from piggsydust.command import query_status, set_utc, turn_off, turn_on
-from piggsydust.const import (
+from pigsydust.command import query_status, set_utc, turn_off, turn_on
+from pigsydust.const import (
     ADDR_BROADCAST,
     OP_ON_OFF,
     OP_STATUS_QUERY,
