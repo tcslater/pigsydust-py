@@ -82,6 +82,19 @@ def led_set_orange(addr: int, level: int) -> bytes:
     return _encode(addr, 0xFF, VENDOR_SKYTONE, bytes([0x00, 0x00, 0xFF, level & 0x0F]), 15)
 
 
+def find_me(addr: int, start: bool = True) -> bytes:
+    """Build a find-me LED flash command (opcode 0xF5, 15-byte plaintext).
+
+    When *start* is True, the device blinks for 15 seconds using the
+    currently configured LED colour. When False, blinking stops.
+    """
+    if start:
+        data = bytes([0x03, 0x0F])  # mode=blink, duration=15s
+    else:
+        data = bytes([0x00, 0x00])
+    return _encode(addr, 0xF5, VENDOR_SKYTONE, data, 15)
+
+
 def led_set_purple(addr: int, orange_level: int) -> bytes:
     """Build a combined LED command for purple (both channels on).
 

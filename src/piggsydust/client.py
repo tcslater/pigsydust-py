@@ -250,6 +250,10 @@ class PixieClient:
     async def turn_off(self, address: int) -> None:
         await self._send_with_retry(command.turn_off(address))
 
+    async def find_me(self, address: int, start: bool = True) -> None:
+        """Flash the LED on a device for 15 seconds (find-me)."""
+        await self._send_with_retry(command.find_me(address, start))
+
     async def set_led_blue(self, address: int, on: bool) -> None:
         await self._send_with_retry(command.led_set_blue(address, on))
 
