@@ -104,6 +104,16 @@ class PixieClient:
     def hardware_version(self) -> str | None:
         return self._hardware_version
 
+    @property
+    def gateway_address(self) -> str:
+        """BLE address of the currently connected gateway."""
+        return self._address
+
+    @property
+    def gateway_mac(self) -> str:
+        """MAC address of the currently connected gateway (colon-separated)."""
+        return _format_mac(self._gw_mac)
+
     # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------

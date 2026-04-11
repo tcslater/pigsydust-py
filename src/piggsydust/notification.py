@@ -17,6 +17,7 @@ class DeviceStatus:
     is_on: bool
     device_type: int
     mac: bytes
+    routing_metric: int = 0
 
 
 @dataclass
@@ -86,6 +87,7 @@ def parse_device_status(n: Notification) -> DeviceStatus:
         address=n.source,
         is_on=n.payload[9] != 0,
         device_type=n.payload[3],
+        routing_metric=n.payload[8],
         mac=bytes(mac),
     )
 
@@ -116,6 +118,7 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
         addr = n.payload[offset]
         if addr == 0:
             continue  # skip empty slot
+        metric = n.payload[offset + 1]
         brightness = n.payload[offset + 2]
         flags = n.payload[offset + 3]
 
@@ -124,6 +127,7 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
             is_on=brightness != 0,
             device_type=flags,
             mac=bytes(6),  # not available in 0xDC format
+            routing_metric=metric,
         ))
 
     return results
