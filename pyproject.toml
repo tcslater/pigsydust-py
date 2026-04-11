@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "piggsydust"
+version = "0.1.0"
+description = "Python library for controlling SAL Pixie BLE mesh wall switches"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Tim Slater" },
+]
+dependencies = [
+    "bleak>=0.21",
+    "bleak-retry-connector>=3.0",
+    "pycryptodome>=3.19",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/piggsydust"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

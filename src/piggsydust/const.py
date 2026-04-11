@@ -1,0 +1,40 @@
+"""Protocol constants for the SAL Pixie BLE mesh."""
+
+# Telink mesh GATT service and characteristics.
+MESH_SERVICE_UUID = "00010203-0405-0607-0809-0a0b0c0d1910"
+CHAR_NOTIFY_UUID = "00010203-0405-0607-0809-0a0b0c0d1911"
+CHAR_CMD_UUID = "00010203-0405-0607-0809-0a0b0c0d1912"
+CHAR_PAIR_UUID = "00010203-0405-0607-0809-0a0b0c0d1914"
+
+# Device Information Service (for MAC extraction on macOS).
+DIS_SERVICE_UUID = "0000180a-0000-1000-8000-00805f9b34fb"
+DIS_MODEL_NUMBER_UUID = "00002a24-0000-1000-8000-00805f9b34fb"
+DIS_FIRMWARE_REV_UUID = "00002a26-0000-1000-8000-00805f9b34fb"
+DIS_HARDWARE_REV_UUID = "00002a27-0000-1000-8000-00805f9b34fb"
+
+# Opcodes.
+OP_ON_OFF = 0xED
+OP_STATUS_QUERY = 0xC5
+OP_STATUS_POLL = 0xDA
+
+# Notification opcodes.
+OP_STATUS_BROADCAST_RESP = 0xDC
+OP_STATUS_POLL_RESP = 0xDB
+
+# Vendor IDs.
+VENDOR_SKYTONE = 0x6969
+VENDOR_SKYTONE_ALT = 0x0211
+
+# Client operation type (bits 7-6 of wire opcode).
+OP_TYPE_CLIENT = 3
+
+# Well-known mesh addresses.
+ADDR_BROADCAST = 0xFFFF
+ADDR_BROADCAST_POLL = 0x7FFF
+
+# BLE advertisement manufacturer ID.
+MANUFACTURER_ID = 0x0211
+
+# Device types from advertisement / status notifications.
+DEVICE_TYPE_GATEWAY = 0x47
+DEVICE_TYPE_LEAF = 0x45
