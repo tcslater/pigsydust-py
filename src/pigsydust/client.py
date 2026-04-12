@@ -163,7 +163,10 @@ class PixieClient:
 
         # Ensure services are discovered (needed when using set_ble_client
         # with an externally-managed connection from bleak-retry-connector).
-        if not self._client.services:
+        try:
+            _ = self._client.services
+        except Exception:
+            _LOGGER.debug("Services not yet discovered, running get_services()")
             await self._client.get_services()
 
         self._mesh_name = mesh_name
