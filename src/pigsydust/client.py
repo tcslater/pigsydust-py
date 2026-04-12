@@ -161,13 +161,10 @@ class PixieClient:
         """Authenticate with the mesh and start background tasks."""
         assert self._client is not None
 
-        # Ensure services are discovered (needed when using set_ble_client
-        # with an externally-managed connection from bleak-retry-connector).
-        try:
-            _ = self._client.services
-        except Exception:
-            _LOGGER.debug("Services not yet discovered, running get_services()")
-            await self._client.get_services()
+        # Always run service discovery — HA's BleakClientWithServiceCache may
+        # return a stale/empty cache without raising.
+        _LOGGER.debug("Running service discovery")
+        await self._client.get_services()
 
         self._mesh_name = mesh_name
         self._mesh_password = mesh_password
