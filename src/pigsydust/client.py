@@ -383,11 +383,12 @@ class PixieClient:
         return None
 
     async def _enable_notify_manual(self, char) -> None:
-        """Enable Telink-style notifications without a CCCD descriptor.
+        """Enable Telink-style notifications without a standard CCCD.
 
-        This is a macOS CoreBluetooth workaround — Telink devices lack a
-        CCCD so start_notify fails.  On Linux/BlueZ start_notify should
-        work and this path is never reached.
+        Telink mesh devices lack a proper CCCD descriptor, so bleak's
+        start_notify fails on both macOS and Linux.  We write 0x01 to
+        the characteristic to enable device-side notifications, then
+        hook into bleak's platform-specific internals to receive them.
         """
         import sys
 
@@ -395,14 +396,33 @@ class PixieClient:
         _LOGGER.debug("Enabling notifications via characteristic write (handle %d)", char.handle)
         await self._client.write_gatt_char(char, b"\x01", response=True)
 
+        backend = self._client._backend
+
         if sys.platform == "darwin":
-            delegate = self._client._backend._delegate
+            # CoreBluetooth: register on the PeripheralDelegate.
+            delegate = backend._delegate
             delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
         else:
-            _LOGGER.warning(
-                "Manual notify fallback on non-macOS platform — "
-                "notifications may not work. Please report this issue."
-            )
+            # BlueZ: register callback and call StartNotify over DBus.
+            try:
+                char_path = char.obj[0]
+                backend._notification_callbacks[char_path] = self._on_notification_raw
+
+                from dbus_fast import Message
+                reply = await backend._bus.call(
+                    Message(
+                        destination="org.bluez",
+                        path=char_path,
+                        interface="org.bluez.GattCharacteristic1",
+                        member="StartNotify",
+                    )
+                )
+                _LOGGER.debug("BlueZ StartNotify succeeded for %s", char_path)
+            except Exception:
+                _LOGGER.warning(
+                    "BlueZ manual notify setup failed — notifications may not work",
+                    exc_info=True,
+                )
 
     def _on_notification_raw(self, data: bytearray) -> None:
         self._on_notification(0, data)
