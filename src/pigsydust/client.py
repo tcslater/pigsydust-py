@@ -161,6 +161,11 @@ class PixieClient:
         """Authenticate with the mesh and start background tasks."""
         assert self._client is not None
 
+        # Ensure services are discovered (needed when using set_ble_client
+        # with an externally-managed connection from bleak-retry-connector).
+        if not self._client.services:
+            await self._client.get_services()
+
         self._mesh_name = mesh_name
         self._mesh_password = mesh_password
 
