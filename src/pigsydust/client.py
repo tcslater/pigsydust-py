@@ -37,7 +37,7 @@ from .notification import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_HEARTBEAT_INTERVAL = 30  # seconds
+_HEARTBEAT_INTERVAL = 25  # seconds — must be < 30s Telink keepalive
 _STATUS_COLLECT_TIMEOUT = 3  # seconds
 _MAX_RECONNECT_ATTEMPTS = 3
 
@@ -77,10 +77,15 @@ class PixieClient:
            await client.login(name, password)
     """
 
-    def __init__(self, ble_address: str) -> None:
+    def __init__(
+        self,
+        ble_address: str,
+        disconnect_callback: Callable[[], None] | None = None,
+    ) -> None:
         self._address = ble_address
         self._client: BleakClient | None = None
         self._owns_client: bool = False  # True if we created the BleakClient
+        self._disconnect_callback = disconnect_callback
         self._session_key: bytes = b""
         self._gw_mac: bytes = b"\x00" * 6
         self._salt: bytes = b"\x00\x00"
@@ -91,6 +96,7 @@ class PixieClient:
         self._mesh_password: str = ""
         self._firmware_version: str | None = None
         self._hardware_version: str | None = None
+        self._hci_sock = None  # raw HCI socket for notification capture
 
     @property
     def is_connected(self) -> bool:
@@ -117,6 +123,20 @@ class PixieClient:
     # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------
+
+    def set_disconnect_callback(self, callback: Callable[[], None]) -> None:
+        """Set or update the disconnect callback."""
+        self._disconnect_callback = callback
+
+    def _on_ble_disconnect(self, *_args) -> None:
+        """Called by bleak when the BLE connection drops.
+
+        The BleakClient wrapper passes (client,) but the raw BlueZ
+        backend calls with no args — accept both.
+        """
+        _LOGGER.warning("BLE connection lost (disconnect callback)")
+        if self._disconnect_callback is not None:
+            self._disconnect_callback()
 
     def set_ble_client(self, client: BleakClient) -> None:
         """Use an externally-managed BleakClient (e.g. from HA bluetooth)."""
@@ -148,11 +168,15 @@ class PixieClient:
                     self._gw_mac = mac
                     _LOGGER.debug("MAC from advertisement: %s", _format_mac(mac))
 
-            self._client = BleakClient(device)
+            self._client = BleakClient(
+                device, disconnected_callback=self._on_ble_disconnect
+            )
         else:
-            # Linux: connect directly by address — avoids HA's BLE wrapper.
-            from bleak.backends.bluezdbus.client import BleakClientBlueZDBus
-            self._client = BleakClientBlueZDBus(self._address, timeout=15.0)
+            # Linux: BleakClient resolves UUIDs and wraps the BlueZ backend.
+            self._client = BleakClient(
+                self._address,
+                disconnected_callback=self._on_ble_disconnect,
+            )
 
             # Extract MAC from address (on Linux the address IS the MAC).
             try:
@@ -164,6 +188,7 @@ class PixieClient:
 
         self._owns_client = True
         await self._client.connect(timeout=15.0)
+
         _LOGGER.debug("Connected, %d services", len(list(self._client.services)))
 
     async def login(self, mesh_name: str, mesh_password: str) -> None:
@@ -215,12 +240,16 @@ class PixieClient:
                 f"CHAR_NOTIFY ({CHAR_NOTIFY_UUID}) not found on device"
             )
 
-        # Telink devices lack a CCCD descriptor. On BlueZ, start_notify
-        # crashes the DBus bus with an EOFError. Skip it entirely and go
-        # straight to the manual Telink enable method.
-        await self._enable_notify_manual(notify_char)
-
+        # Start heartbeat BEFORE enabling notifications — the Telink 30s
+        # keepalive timer is already ticking, and the notify setup may
+        # take time (or block if D-Bus calls hang).
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+        # Telink devices have a CCCD descriptor but the firmware doesn't
+        # respond to ATT writes on it, causing BlueZ's StartNotify /
+        # AcquireNotify to hang and eventually kill the connection.
+        # Use the Telink-specific enable method instead.
+        await self._enable_notify_manual(notify_char)
 
         try:
             await self._send(command.set_utc())
@@ -236,6 +265,17 @@ class PixieClient:
             except asyncio.CancelledError:
                 pass
             self._heartbeat_task = None
+
+        if self._hci_sock is not None:
+            try:
+                asyncio.get_running_loop().remove_reader(self._hci_sock.fileno())
+            except Exception:
+                pass
+            try:
+                self._hci_sock.close()
+            except Exception:
+                pass
+            self._hci_sock = None
 
         if self._owns_client and self._client is not None and self._client.is_connected:
             await self._client.disconnect()
@@ -403,12 +443,14 @@ class PixieClient:
         return None
 
     async def _enable_notify_manual(self, char) -> None:
-        """Enable Telink-style notifications without a standard CCCD.
+        """Enable Telink-style notifications.
 
-        Telink mesh devices lack a proper CCCD descriptor, so bleak's
-        start_notify fails on both macOS and Linux.  We write 0x01 to
-        the characteristic to enable device-side notifications, then
-        hook into bleak's platform-specific internals to receive them.
+        Telink mesh devices have a CCCD descriptor but the firmware
+        ignores ATT writes to it, so bleak's start_notify hangs on
+        Linux (BlueZ times out the ATT write after ~30s, killing the
+        connection).  We write 0x01 to the characteristic *value* to
+        enable device-side notifications, then use platform-specific
+        internals to receive them.
         """
         import sys
 
@@ -416,50 +458,99 @@ class PixieClient:
         backend = self._client._backend
 
         # Write 0x01 to the characteristic to enable device-side notifications.
-        # Use the backend directly to avoid bleak's services check.
         _LOGGER.debug("Enabling notifications via characteristic write (handle %d)", char.handle)
-        if sys.platform == "darwin":
-            await self._client.write_gatt_char(char, b"\x01", response=True)
-        else:
-            # BlueZ: write via DBus directly.
-            from dbus_fast import Message, Variant
-            char_path = char.obj[0]
-            await backend._bus.call(
-                Message(
-                    destination="org.bluez",
-                    path=char_path,
-                    interface="org.bluez.GattCharacteristic1",
-                    member="WriteValue",
-                    body=[b"\x01", {}],
-                    signature="aya{sv}",
-                )
-            )
+        await self._client.write_gatt_char(char, b"\x01", response=True)
 
         if sys.platform == "darwin":
             # CoreBluetooth: register on the PeripheralDelegate.
             delegate = backend._delegate
             delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
         else:
-            # BlueZ: register callback and call StartNotify over DBus.
-            try:
-                char_path = char.obj[0]
-                backend._notification_callbacks[char_path] = self._on_notification_raw
+            # BlueZ: the Telink CCCD descriptor exists but doesn't
+            # respond to standard ATT writes, causing AcquireNotify /
+            # StartNotify to hang and eventually kill the connection.
+            #
+            # Bypass BlueZ's D-Bus notification layer entirely and read
+            # ATT_HANDLE_VALUE_NTF PDUs from a raw HCI socket instead.
+            # The value attribute handle is char.handle + 1 (GATT layout:
+            # declaration handle, then value handle, then descriptors).
+            value_handle = char.handle + 1
+            self._start_hci_notify_reader(value_handle)
 
-                from dbus_fast import Message
-                await backend._bus.call(
-                    Message(
-                        destination="org.bluez",
-                        path=char_path,
-                        interface="org.bluez.GattCharacteristic1",
-                        member="StartNotify",
-                    )
-                )
-                _LOGGER.debug("BlueZ StartNotify succeeded for %s", char_path)
+    def _start_hci_notify_reader(self, value_handle: int) -> None:
+        """Monitor raw HCI traffic for ATT notification PDUs.
+
+        BlueZ's StartNotify/AcquireNotify hang on Telink devices (the
+        CCCD descriptor exists but the firmware doesn't respond to ATT
+        writes on it).  Instead we open a raw HCI socket and parse
+        ATT_HANDLE_VALUE_NTF (0x1B) PDUs directly.
+        """
+        import socket
+        import struct
+
+        ATT_HANDLE_VALUE_NTF = 0x1B
+        HCI_ACL_DATA_PKT = 0x02
+        ATT_CID = 0x0004
+
+        try:
+            sock = socket.socket(
+                socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI
+            )
+            sock.bind((0,))  # hci0
+
+            # HCI filter: accept ACL data packets (type 2)
+            # struct hci_filter { type_mask(4), event_mask(8), opcode(2), pad(2) }
+            flt = bytearray(16)
+            struct.pack_into("<I", flt, 0, 1 << HCI_ACL_DATA_PKT)  # type_mask
+            sock.setsockopt(0, 2, bytes(flt))  # SOL_HCI=0, HCI_FILTER=2
+            sock.setblocking(False)
+        except Exception:
+            _LOGGER.warning(
+                "Could not open raw HCI socket — notifications won't work. "
+                "Ensure the container runs with --privileged or has "
+                "NET_RAW + NET_ADMIN capabilities.",
+                exc_info=True,
+            )
+            return
+
+        self._hci_sock = sock
+
+        loop = asyncio.get_running_loop()
+
+        def _on_hci_readable() -> None:
+            try:
+                while True:
+                    data = sock.recv(1024)
+                    if not data or data[0] != HCI_ACL_DATA_PKT:
+                        continue
+                    # ACL: type(1) handle(2) total_len(2) l2cap_len(2) l2cap_cid(2) att...
+                    if len(data) < 10:
+                        continue
+                    l2cap_cid = struct.unpack_from("<H", data, 7)[0]
+                    if l2cap_cid != ATT_CID:
+                        continue
+                    att_opcode = data[9]
+                    if att_opcode != ATT_HANDLE_VALUE_NTF:
+                        continue
+                    if len(data) < 12:
+                        continue
+                    att_handle = struct.unpack_from("<H", data, 10)[0]
+                    if att_handle != value_handle:
+                        continue
+                    att_value = bytearray(data[12:])
+                    self._on_notification_raw(att_value)
+            except BlockingIOError:
+                pass
+            except OSError:
+                # Socket closed
+                pass
             except Exception:
-                _LOGGER.warning(
-                    "BlueZ manual notify setup failed — notifications may not work",
-                    exc_info=True,
-                )
+                _LOGGER.debug("HCI read error", exc_info=True)
+
+        loop.add_reader(sock.fileno(), _on_hci_readable)
+        _LOGGER.info(
+            "HCI notification reader active (value_handle=%d)", value_handle
+        )
 
     def _on_notification_raw(self, data: bytearray) -> None:
         self._on_notification(0, data)
@@ -505,13 +596,18 @@ class PixieClient:
                     _LOGGER.exception("Status callback error")
 
     async def _heartbeat_loop(self) -> None:
+        # First heartbeat fires immediately — the Telink 30s keepalive
+        # timer starts when the BLE connection is established, not when
+        # the heartbeat task begins.  Login overhead can eat several
+        # seconds, so we must not sleep before the first read.
         while True:
-            await asyncio.sleep(_HEARTBEAT_INTERVAL)
             try:
                 if self._client is not None and self._client.is_connected:
                     await self._client.read_gatt_char(CHAR_PAIR_UUID)
+                    _LOGGER.debug("Heartbeat OK")
             except Exception:
                 _LOGGER.debug("Heartbeat read failed", exc_info=True)
+            await asyncio.sleep(_HEARTBEAT_INTERVAL)
 
     async def _read_dis_string(self, uuid: str) -> str | None:
         assert self._client is not None
