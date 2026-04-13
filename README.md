@@ -29,3 +29,7 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Protocol Reference
+
+See [PROTOCOL-REFERENCE.md](https://github.com/tcslater/pigsydust/blob/main/docs/PROTOCOL-REFERENCE.md) in the Go library repo for full documentation of the Telink mesh BLE protocol — GATT characteristics, authentication, encryption, opcodes, and notification formats.
