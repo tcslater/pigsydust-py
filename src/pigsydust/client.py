@@ -152,7 +152,7 @@ class PixieClient:
         else:
             # Linux: connect directly by address — avoids HA's BLE wrapper.
             from bleak.backends.bluezdbus.client import BleakClientBlueZDBus
-            self._client = BleakClientBlueZDBus(self._address)
+            self._client = BleakClientBlueZDBus(self._address, timeout=15.0)
 
             # Extract MAC from address (on Linux the address IS the MAC).
             try:
