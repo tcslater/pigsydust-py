@@ -161,10 +161,19 @@ class PixieClient:
         """Authenticate with the mesh and start background tasks."""
         assert self._client is not None
 
-        # Always run service discovery — HA's BleakClientWithServiceCache may
-        # return a stale/empty cache without raising.
-        _LOGGER.debug("Running service discovery")
-        await self._client.get_services()
+        # Ensure services are discovered. Different bleak wrappers handle
+        # this differently — try get_services(), fall back to connect().
+        try:
+            _ = self._client.services
+            _LOGGER.debug("Services already available (%d services)", len(list(self._client.services)))
+        except Exception:
+            _LOGGER.debug("Services not available, triggering discovery")
+            if hasattr(self._client, 'get_services'):
+                await self._client.get_services()
+            elif not self._client.is_connected:
+                await self._client.connect()
+            else:
+                _LOGGER.warning("Connected but services unavailable — may fail")
 
         self._mesh_name = mesh_name
         self._mesh_password = mesh_password
