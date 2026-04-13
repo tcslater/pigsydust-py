@@ -245,13 +245,21 @@ class PixieClient:
         # take time (or block if D-Bus calls hang).
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-        # Try standard start_notify first (works with HA's wrapper on macOS).
-        # Fall back to manual Telink method if it fails.
-        try:
-            await self._client.start_notify(notify_char, self._on_notification)
-            _LOGGER.debug("start_notify succeeded")
-        except Exception as err:
-            _LOGGER.debug("start_notify failed (%s), trying manual enable", err)
+        import sys
+        if sys.platform == "darwin":
+            # macOS: try standard start_notify first (works with HA's
+            # wrapper and CoreBluetooth).  Fall back to manual method.
+            try:
+                await self._client.start_notify(notify_char, self._on_notification)
+                _LOGGER.debug("start_notify succeeded")
+            except Exception as err:
+                _LOGGER.debug("start_notify failed (%s), trying manual enable", err)
+                await self._enable_notify_manual(notify_char)
+        else:
+            # Linux: skip start_notify entirely.  BlueZ's AcquireNotify
+            # hangs because the Telink CCCD doesn't respond to ATT writes,
+            # and cancelling the call corrupts the D-Bus bus.  Go straight
+            # to the manual Telink enable + raw HCI socket.
             await self._enable_notify_manual(notify_char)
 
         try:
