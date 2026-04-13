@@ -125,37 +125,46 @@ class PixieClient:
 
     async def connect(self) -> None:
         """Establish BLE connection (standalone mode — scans and connects)."""
-        device = None
-        adv_data = None
+        import sys
 
-        devices = await BleakScanner.discover(timeout=10.0, return_adv=True)
-        for d, adv in devices.values():
-            if d.address == self._address:
-                device = d
-                adv_data = adv
-                break
+        if sys.platform == "darwin":
+            # macOS: need to scan first to get BLEDevice (can't connect by address).
+            device = None
+            adv_data = None
 
-        if device is None:
-            raise ConnectionError(f"Device {self._address} not found")
+            devices = await BleakScanner.discover(timeout=10.0, return_adv=True)
+            for d, adv in devices.values():
+                if d.address == self._address:
+                    device = d
+                    adv_data = adv
+                    break
 
-        if adv_data and adv_data.manufacturer_data:
-            mac = _extract_mac_from_manufacturer_data(adv_data.manufacturer_data)
-            if mac is not None:
-                self._gw_mac = mac
-                _LOGGER.debug("MAC from advertisement: %s", _format_mac(mac))
+            if device is None:
+                raise ConnectionError(f"Device {self._address} not found")
 
-        self._client = BleakClient(device)
+            if adv_data and adv_data.manufacturer_data:
+                mac = _extract_mac_from_manufacturer_data(adv_data.manufacturer_data)
+                if mac is not None:
+                    self._gw_mac = mac
+                    _LOGGER.debug("MAC from advertisement: %s", _format_mac(mac))
+
+            self._client = BleakClient(device)
+        else:
+            # Linux: connect directly by address — avoids HA's BLE wrapper.
+            from bleak.backends.bluezdbus.client import BleakClientBlueZDBus
+            self._client = BleakClientBlueZDBus(self._address)
+
+            # Extract MAC from address (on Linux the address IS the MAC).
+            try:
+                parts = self._address.split(":")
+                if len(parts) == 6:
+                    self._gw_mac = bytes(int(p, 16) for p in parts)
+            except Exception:
+                pass
+
         self._owns_client = True
-        await self._client.connect()
-
-        for svc in self._client.services:
-            for ch in svc.characteristics:
-                props = ", ".join(ch.properties)
-                descs = [f"{d.uuid}@{d.handle}" for d in ch.descriptors]
-                _LOGGER.debug(
-                    "  %s char %s handle=%d [%s] descs=%s",
-                    svc.uuid, ch.uuid, ch.handle, props, descs,
-                )
+        await self._client.connect(timeout=15.0)
+        _LOGGER.debug("Connected, %d services", len(list(self._client.services)))
 
     async def login(self, mesh_name: str, mesh_password: str) -> None:
         """Authenticate with the mesh and start background tasks."""
