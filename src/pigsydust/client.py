@@ -206,13 +206,10 @@ class PixieClient:
                 f"CHAR_NOTIFY ({CHAR_NOTIFY_UUID}) not found on device"
             )
 
-        try:
-            await self._client.start_notify(notify_char, self._on_notification)
-        except Exception as err:
-            _LOGGER.debug(
-                "start_notify failed (%s), trying manual CCCD write", err
-            )
-            await self._enable_notify_manual(notify_char)
+        # Telink devices lack a CCCD descriptor. On BlueZ, start_notify
+        # crashes the DBus bus with an EOFError. Skip it entirely and go
+        # straight to the manual Telink enable method.
+        await self._enable_notify_manual(notify_char)
 
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
@@ -407,10 +404,27 @@ class PixieClient:
         import sys
 
         assert self._client is not None
-        _LOGGER.debug("Enabling notifications via characteristic write (handle %d)", char.handle)
-        await self._client.write_gatt_char(char, b"\x01", response=True)
-
         backend = self._client._backend
+
+        # Write 0x01 to the characteristic to enable device-side notifications.
+        # Use the backend directly to avoid bleak's services check.
+        _LOGGER.debug("Enabling notifications via characteristic write (handle %d)", char.handle)
+        if sys.platform == "darwin":
+            await self._client.write_gatt_char(char, b"\x01", response=True)
+        else:
+            # BlueZ: write via DBus directly.
+            from dbus_fast import Message, Variant
+            char_path = char.obj[0]
+            await backend._bus.call(
+                Message(
+                    destination="org.bluez",
+                    path=char_path,
+                    interface="org.bluez.GattCharacteristic1",
+                    member="WriteValue",
+                    body=[b"\x01", {}],
+                    signature="aya{sv}",
+                )
+            )
 
         if sys.platform == "darwin":
             # CoreBluetooth: register on the PeripheralDelegate.
@@ -423,7 +437,7 @@ class PixieClient:
                 backend._notification_callbacks[char_path] = self._on_notification_raw
 
                 from dbus_fast import Message
-                reply = await backend._bus.call(
+                await backend._bus.call(
                     Message(
                         destination="org.bluez",
                         path=char_path,
