@@ -245,11 +245,14 @@ class PixieClient:
         # take time (or block if D-Bus calls hang).
         self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
-        # Telink devices have a CCCD descriptor but the firmware doesn't
-        # respond to ATT writes on it, causing BlueZ's StartNotify /
-        # AcquireNotify to hang and eventually kill the connection.
-        # Use the Telink-specific enable method instead.
-        await self._enable_notify_manual(notify_char)
+        # Try standard start_notify first (works with HA's wrapper on macOS).
+        # Fall back to manual Telink method if it fails.
+        try:
+            await self._client.start_notify(notify_char, self._on_notification)
+            _LOGGER.debug("start_notify succeeded")
+        except Exception as err:
+            _LOGGER.debug("start_notify failed (%s), trying manual enable", err)
+            await self._enable_notify_manual(notify_char)
 
         try:
             await self._send(command.set_utc())
@@ -463,8 +466,16 @@ class PixieClient:
 
         if sys.platform == "darwin":
             # CoreBluetooth: register on the PeripheralDelegate.
-            delegate = backend._delegate
-            delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
+            # Navigate through HA wrapper if present.
+            cb_backend = backend
+            while hasattr(cb_backend, '_backend') and not hasattr(cb_backend, '_delegate'):
+                cb_backend = cb_backend._backend
+            if hasattr(cb_backend, '_delegate'):
+                delegate = cb_backend._delegate
+                delegate._characteristic_notify_callbacks[char.handle] = self._on_notification_raw
+                _LOGGER.debug("Registered CoreBluetooth notification callback on handle %d", char.handle)
+            else:
+                _LOGGER.warning("Could not find CoreBluetooth delegate — notifications won't work")
         else:
             # BlueZ: the Telink CCCD descriptor exists but doesn't
             # respond to standard ATT writes, causing AcquireNotify /
