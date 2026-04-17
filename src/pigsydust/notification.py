@@ -15,7 +15,7 @@ class DeviceStatus:
 
     address: int
     is_on: bool
-    device_type: int
+    major_type: int
     mac: bytes
     routing_metric: int = 0
 
@@ -69,7 +69,7 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     0xDB is a unicast status poll response with ``src_addr`` set in the
     wire header.  Payload format (10 bytes after opcode+vendor)::
 
-        padding(1) || product_rev(1) || product_class(1) || device_type(1) ||
+        padding(1) || product_rev(1) || product_class(1) || major_type(1) ||
         mac[5:4:3:2](4) || routing_metric(1) || on_off(1)
     """
     if n.opcode != OP_STATUS_POLL_RESP:
@@ -86,7 +86,7 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     return DeviceStatus(
         address=n.source,
         is_on=n.payload[9] != 0,
-        device_type=n.payload[3],
+        major_type=n.payload[3],
         routing_metric=n.payload[8],
         mac=bytes(mac),
     )
@@ -125,7 +125,7 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
         results.append(DeviceStatus(
             address=addr,
             is_on=brightness != 0,
-            device_type=flags,
+            major_type=flags,
             mac=bytes(6),  # not available in 0xDC format
             routing_metric=metric,
         ))

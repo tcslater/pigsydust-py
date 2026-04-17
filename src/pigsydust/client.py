@@ -606,7 +606,7 @@ class PixieClient:
         for ds in statuses:
             _LOGGER.debug(
                 "DeviceStatus: addr=%d on=%s type=0x%02X",
-                ds.address, ds.is_on, ds.device_type,
+                ds.address, ds.is_on, ds.major_type,
             )
             for cb in self._status_callbacks:
                 try:

@@ -34,7 +34,3 @@ ADDR_BROADCAST_POLL = 0x7FFF
 
 # BLE advertisement manufacturer ID.
 MANUFACTURER_ID = 0x0211
-
-# Device types from advertisement / status notifications.
-DEVICE_TYPE_GATEWAY = 0x47
-DEVICE_TYPE_LEAF = 0x45

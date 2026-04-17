@@ -87,11 +87,10 @@ async def main(config_path: str) -> None:
     if not status:
         print("      No devices responded.")
     for addr, ds in sorted(status.items()):
-        dtype = "gateway" if ds.device_type == 0x47 else "leaf"
         state = "ON" if ds.is_on else "OFF"
         mac = ":".join(f"{b:02X}" for b in ds.mac)
         label = device_label(addr, device_map)
-        print(f"      {label}  {dtype}  {state}  (reported MAC={mac})")
+        print(f"      {label}  major=0x{ds.major_type:02X}  {state}  (reported MAC={mac})")
 
     # Show which living-building devices didn't respond.
     responded = set(status.keys())

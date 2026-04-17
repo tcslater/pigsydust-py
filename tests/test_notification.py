@@ -51,7 +51,7 @@ def test_parse_device_status_0xdb():
     payload[0] = 0x00  # padding
     payload[1] = 0x16  # product_rev
     payload[2] = 0x0C  # product_class
-    payload[3] = 0x47  # device_type = gateway
+    payload[3] = 0x47  # major_type
     payload[4] = 0xFF  # mac[5]
     payload[5] = 0xEE  # mac[4]
     payload[6] = 0xDD  # mac[3]
@@ -64,14 +64,14 @@ def test_parse_device_status_0xdb():
 
     assert ds.address == 0x007D
     assert ds.is_on is True
-    assert ds.device_type == 0x47
+    assert ds.major_type == 0x47
     assert ds.mac[5] == 0xFF
     assert ds.mac[4] == 0xEE
 
 
 def test_parse_device_status_0xdb_off():
     payload = bytearray(10)
-    payload[3] = 0x45  # leaf
+    payload[3] = 0x45  # major_type (opaque; observed across hardware)
     payload[9] = 0x00  # OFF
 
     n = Notification(source=0x0002, opcode=0xDB, vendor=0x0211, payload=bytes(payload))
@@ -79,7 +79,7 @@ def test_parse_device_status_0xdb_off():
 
     assert ds.address == 0x0002
     assert ds.is_on is False
-    assert ds.device_type == 0x45
+    assert ds.major_type == 0x45
 
 
 # --- 0xDC (broadcast status, two devices packed) ---
