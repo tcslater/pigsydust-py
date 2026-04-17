@@ -21,6 +21,7 @@ from .const import (
 )
 from .crypto import (
     LoginError,
+    TagMismatchError,
     build_login_request,
     command_nonce,
     derive_session_key,
@@ -580,6 +581,13 @@ class PixieClient:
 
         try:
             n = decrypt_notification(self._session_key, self._gw_mac, raw)
+        except TagMismatchError:
+            # Common and expected — happens when a notification from a
+            # prior session arrives after a re-login (new session key),
+            # or when the mesh retransmits a packet we've already
+            # consumed. Log without traceback to keep the noise down.
+            _LOGGER.debug("Dropped notification (tag mismatch)")
+            return
         except Exception:
             _LOGGER.debug("Failed to decrypt notification", exc_info=True)
             return
