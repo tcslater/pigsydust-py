@@ -31,9 +31,10 @@ Pixie devices over BLE, fully offline — no cloud, no hub, no app dependency.
 11. [Schedule Record Format](#schedule-record-format)
 12. [Schedule Flows](#schedule-flows)
 13. [Timezone & Weekday Rotation](#timezone--weekday-rotation)
-14. [Gateway Detection](#gateway-detection)
-15. [Connection Maintenance](#connection-maintenance)
-16. [Platform Notes](#platform-notes)
+14. [Connecting to the Mesh](#connecting-to-the-mesh)
+15. [Device Classes](#device-classes)
+16. [Connection Maintenance](#connection-maintenance)
+17. [Platform Notes](#platform-notes)
 
 ---
 
@@ -41,9 +42,10 @@ Pixie devices over BLE, fully offline — no cloud, no hub, no app dependency.
 
 SAL Pixie switches use a **Telink BLE mesh** with a proprietary application
 layer. All communication is BLE — there is no WiFi, no cloud, no internet
-requirement. A client (phone, computer, proxy) connects to any one mesh node
-(the "gateway"), authenticates, and sends encrypted commands that the mesh
-relays to all other nodes.
+requirement. A client (phone, computer, proxy) opens a BLE GATT connection to
+any one visible mesh node, authenticates, and sends encrypted commands that
+the mesh relays to all other nodes. Any node can serve as the connection
+point; there is no master/gateway role on the mesh side.
 
 Key characteristics:
 - **Mesh topology**: single-hop BLE mesh. Commands sent to any connected node
@@ -74,21 +76,36 @@ Bytes after the 2-byte company ID (`0x0211`):
 |--------|--------|---------|
 | 0-1 | 2 | Unknown |
 | 2-5 | 4 | MAC bytes `[5,4,3,2]` in little-endian order |
-| 14 | 1 | Device type: `0x47` = gateway, `0x45` = leaf |
+| 14 | 1 | Packed status byte (the app calls it `majorType`) — see below |
+| 15-16 | 2 | Device class — 16-bit big-endian `(type << 8) \| stype` |
 | 17-20 | 4 | Mesh network ID (little-endian 32-bit) |
-
-The **mesh network ID** at bytes 17-20 is how nodes recognise members of
-their home network in the advertisement stream.
-
-The **device type byte** at offset 14 indicates which node currently holds
-the gateway role. The gateway role is dynamic — the mesh periodically
-renegotiates which node serves as gateway. Your client should prefer
-connecting to the current gateway (`0x47`) for best first-hop behaviour.
 
 The **MAC bytes** at offset 2-5 provide the real hardware MAC address on
 platforms (like macOS/iOS) where the OS randomises BLE addresses. Extract
 the full 6-byte MAC by combining these 4 bytes with the remaining 2 bytes
 from the BLE address or Device Information Service.
+
+#### Byte 14 — packed status
+
+A packed flag/version byte:
+
+| Bits | Meaning |
+|------|---------|
+| 0 | Online / used flag |
+| 1 | `alarmDev` — set while the device is participating in an alarm group/scene |
+| 2-7 | 6-bit firmware version |
+
+#### Bytes 15-16 — device class
+
+A 16-bit big-endian value encoding the device class as `(type << 8) | stype`.
+For example, a wall switch is `(type=44, stype=22)` = `0x2c16`; a Gen-3
+dimmer is `(46, 26)` = `0x2e1a`. The full table is enumerated in
+[Device Classes](#device-classes).
+
+#### Bytes 17-20 — mesh network ID
+
+A little-endian 32-bit network identifier. Nodes use this to recognise
+members of the same home network in the advertisement stream.
 
 ---
 
@@ -224,7 +241,7 @@ sno(3) || tag(2) || ciphertext(N)
 nonce[8] = gwMAC[5] || gwMAC[4] || gwMAC[3] || gwMAC[2] || 0x01 || sno[0] || sno[1] || sno[2]
 ```
 
-Where `gwMAC` is the connected gateway's MAC address in standard printed order
+Where `gwMAC` is the connected node's MAC address in standard printed order
 (`AA:BB:CC:DD:EE:FF` → `gwMAC[0]=AA ... gwMAC[5]=FF`). The nonce uses the
 **low 4 bytes in little-endian order** (bytes 5,4,3,2 of the printed MAC).
 
@@ -393,7 +410,7 @@ dst(2 LE) || 0xda || 11 02 || 10 00
 | 3 | `0x00` (padding) |
 | 4 | Product revision |
 | 5 | Product class |
-| 6 | Device type (`0x45` = leaf, `0x47` = gateway) |
+| 6 | Packed status byte — same layout as advert byte 14 (bit 0 = online, bit 1 = alarmDev, bits 2-7 = firmware version). |
 | 7-10 | Source MAC bytes `[5,4,3,2]` |
 | 11 | Mesh routing metric (variable per-frame, likely hop count) |
 | 12 | On/off state: `0x00` = off, `0x01` = on |
@@ -445,7 +462,7 @@ dst(2 LE) || 0xef || 69 69 || grp_count(1) || gw_mac5(1) || grp_low[0..N-1] || 0
 ```
 
 - `grp_count`: number of groups (0 = remove from all groups)
-- `gw_mac5`: last byte of the connected gateway's MAC (required for
+- `gw_mac5`: last byte of the connected node's MAC (required for
   firmware validation)
 - `grp_low[i]`: low byte of each group address (firmware reconstructs
   `0x8000 | grp_low`)
@@ -550,10 +567,10 @@ dst(2 LE) || 0xd9 || 6b 69 || gw_mac5(1) || 0x00
 ```
 
 - **Vendor is `0x696b`** (unique to this opcode, not the usual `0x6969`)
-- `gw_mac5`: last byte of the connected gateway's MAC address. This is a
+- `gw_mac5`: last byte of the connected node's MAC address. This is a
   **relay routing tag** — the mesh firmware silently drops the response if
-  this byte doesn't match the gateway identity. Sending any other value
-  results in a timeout with no error indication.
+  this byte doesn't match the connected node's identity. Sending any other
+  value results in a timeout with no error indication.
 
 **Required query sequence**:
 1. Send unicast `0xda` status poll to the target device
@@ -621,9 +638,9 @@ start.
 All schedule operations target the **schedule coordinator** at address
 `0x0030`. The coordinator manages up to 250 alarm slots (0x00-0xf9).
 
-The **gateway cookie** (`gw_mac5` — last byte of the connected gateway's
-MAC) is required for all schedule queries and deletes. Sending the wrong
-cookie causes silent failures.
+The `gw_mac5` cookie (last byte of the connected node's MAC) is required
+for all schedule queries and deletes. Sending the wrong cookie causes
+silent failures.
 
 #### 0xcc — Write Alarm (2 fragments)
 
@@ -700,11 +717,6 @@ dst(2 LE) || 0xd0 || 69 69 || frag_index(1) || compressed_sun_data[8]
 
 - Fragment 2 has an XOR checksum as the trailing byte
 - Payload contains day-of-epoch and compressed astronomical data
-
-> **Status**: fully analysed from firmware but never observed in any app
-> capture. Believed to be exclusive to the "PIXIE Plus" / Gateway app
-> variant, not the plain PIXIE app. The firmware code exists in the shared
-> library but may not be reachable from the plain app's UI layer.
 
 ---
 
@@ -785,7 +797,7 @@ enable/disable toggles of the same alarm.
 
 ### Delete Alarm
 
-1. Send `0xce` with the slot index and gateway cookie
+1. Send `0xce` with the slot index and `gw_mac5` cookie
 
 ### Enable/Disable Alarm
 
@@ -831,26 +843,105 @@ The reverse conversion (UTC→local) uses the inverse rotations.
 
 ---
 
-## Gateway Detection
+## Connecting to the Mesh
 
-The **gateway** is whichever mesh node the client has a direct BLE connection
-to. Any mesh node can serve as gateway — the role is dynamic and renegotiated
-by the mesh.
+A client connects to a single mesh node and uses it as the entry point for
+all subsequent commands. Any node will relay broadcast traffic to the rest
+of the mesh.
 
-To select a gateway:
-1. Scan for BLE advertisements matching the mesh name and network ID
-2. Read manufacturer data byte 14: `0x47` = current gateway, `0x45` = leaf
-3. Prefer connecting to the current gateway (`0x47`) for best relay performance
-4. If no `0x47` node is visible, any `0x45` node works — it will relay commands
+To select a node:
+1. Scan for BLE advertisements with manufacturer ID `0x0211` matching the
+   target home network ID (advert bytes 17-20).
+2. Pick a node — typically the strongest RSSI to minimise BLE retries.
+3. Open a GATT connection and proceed with [Authentication](#authentication-login).
 
-The gateway's MAC address is needed for:
-- Command packet encryption (nonce construction)
-- Notification packet decryption (nonce construction)
+The connected node's MAC address is needed for:
+- Command packet encryption nonce construction
+- Notification packet decryption nonce construction
 - The `gw_mac5` cookie in LED queries, schedule queries, group commands, and
   schedule deletes
 
-`gw_mac5` is specifically byte index 5 (the last byte) of the gateway's MAC
+`gw_mac5` is byte index 5 (the last byte) of the connected node's MAC
 address in standard printed order (`AA:BB:CC:DD:EE:FF` → `gw_mac5 = 0xFF`).
+The mesh firmware uses it as a routing tag and silently drops responses if
+the value is wrong.
+
+---
+
+## Device Classes
+
+The 16-bit big-endian value at advert bytes `[15..16]` identifies the device
+class as `(type << 8) | stype`. Known classes:
+
+| Identifier | (type, stype) | BE16 |
+|------------|--------------:|:----:|
+| `BRIDGE` | (2, 22) | `0x0216` |
+| `BRIDGE_G2` | (2, 4) | `0x0204` |
+| `SWITCH` | (44, 22) | `0x2c16` |
+| `TSWITCH` | (42, 24) | `0x2a18` |
+| `TSWITCHG2` | (42, 26) | `0x2a1a` |
+| `DIMMER` | (46, 22) | `0x2e16` |
+| `DIMMER_G2` | (46, 24) | `0x2e18` |
+| `DIMMER_G3` | (46, 26) | `0x2e1a` |
+| `RFD` | (40, 26) | `0x281a` |
+| `RFD_CT` | (50, 26) | `0x321a` |
+| `RFD2` | (48, 104) | `0x3068` |
+| `RFD2_CT` | (50, 104) | `0x3268` |
+| `STRIP_W` | (48, 4) | `0x3004` |
+| `STRIP_RGB` | (54, 4) | `0x3604` |
+| `STRIP2_RGBCCT` | (52, 8) | `0x3408` |
+| `STRIP2_RGB` | (54, 8) | `0x3608` |
+| `STRIP2_CCT` | (50, 8) | `0x3208` |
+| `RGB_X` | (54, 198) | `0x36c6` |
+| `FCS` | (48, 6) | `0x3006` |
+| `FCR` | (54, 6) | `0x3606` |
+| `POL` | (2, 14) | `0x020e` |
+| `SPO2` | (4, 16) | `0x0410` |
+| `SPO3` | (4, 16) | `0x0410` |
+| `DRC` | (20, 4) | `0x1404` |
+| `BSC` | (22, 4) | `0x1604` |
+| `FAN_ONLY` | (12, 30) | `0x0c1e` |
+| `FAN_CT` | (108, 30) | `0x6c1e` |
+| `FAN_ONLY9` | (18, 30) | `0x121e` |
+| `FAN_CT9` | (114, 30) | `0x721e` |
+| `VFAN_ONLY` | (10, 30) | `0x0a1e` |
+| `VFAN_CT` | (106, 30) | `0x6a1e` |
+| `BFAN_ONLY` | (14, 96) | `0x0e60` |
+| `IR36` | (60, 2) | `0x3c02` |
+| `IR12` | (60, 4) | `0x3c04` |
+| `SMR` | (60, 6) | `0x3c06` |
+| `DRS` | (60, 20) | `0x3c14` |
+| `DRSM2` | (60, 22) | `0x3c16` |
+| `DRSM3` | (60, 24) | `0x3c18` |
+| `DM10` | (48, 96) | `0x3060` |
+| `DALI_DT6` | (48, 98) | `0x3062` |
+| `GDC1` | (24, 2) | `0x1802` |
+| `GDC1_SW` | (24, 4) | `0x1804` |
+| `GDC1_SL` | (24, 6) | `0x1806` |
+| `GDC1_W` | (24, 16) | `0x1810` |
+| `GDC2` | (24, 34) | `0x1822` |
+| `GDC1_M2` | (26, 2) | `0x1a02` |
+| `GDC1_M2W` | (26, 4) | `0x1a04` |
+| `GDC1_M2L` | (26, 6) | `0x1a06` |
+| `RCT_W` | (48, 100) | `0x3064` |
+| `RCT_CCT` | (50, 100) | `0x3264` |
+| `RCT_RGB` | (54, 100) | `0x3664` |
+| `RCT_RGBW` | (52, 100) | `0x3464` |
+| `RCT_RGBCCT` | (56, 100) | `0x3864` |
+| `ZCL` | (16, 108) | `0x106c` |
+| `ACF_VRV` | (4, 102) | `0x0466` |
+| `ACF_DUCTED` | (2, 102) | `0x0266` |
+| `SGB` | (2, 28) | `0x021c` |
+| `SGB3` | (102, 16) | `0x6610` |
+| `SGBX` | (4, 104) | `0x0468` |
+| `SGBX2` | (4, 106) | `0x046a` |
+| `SGBX0` | (106, 106) | `0x6a6a` |
+| `DELAY` | (19998, 19998) | (synthetic) |
+
+Identifiers `UNKNOW`, `PCP5`, `RFD2_SCAN`, `ACF_RS8`, `CAP`, `MTW`,
+`MTW2_AN`, `MTW2_AL`, `MRC`, `DIAL`, `STC`, `SIC`, `CAP3`, `SFI_8266`,
+`SFI_825X`, `DV02`, `SONOS` are resolved via a third-party fallback path and
+do not have static `(type, stype)` encodings.
 
 ---
 
