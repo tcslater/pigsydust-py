@@ -726,12 +726,13 @@ The 16-byte alarm record carried by `0xcc` write and `0xc2` query responses:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | 1 | `id` | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. |
+| 0 | 1 | `id` (`no`) | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. (Field name in `alarm2json` output is `no`.) |
 | 1 | 1 | `repeat` | Weekday bitmask (UTC-rotated). `bit0`=Mon, `bit1`=Tue, ... `bit6`=Sun. `0x7f`=daily, `0x1f`=Mon-Fri, `0x00`=one-shot. See [Timezone & Weekday Rotation](#timezone--weekday-rotation). |
 | 2 | 1 | `hour` | Fire hour in **UTC** (0-23). |
 | 3 | 1 | `min` | Fire minute in **UTC** (0-59). |
-| 4-5 | 2 | `type` | Type marker (little-endian). `0x0003` = countdown timer. `0x0000` = regular timer. |
-| 6 | 1 | `sec` | For countdowns: duration in whole minutes. For regular timers: always `0x00`. |
+| 4 | 1 | `kind` | Timer kind: `0x00` = regular, `0x01` = Flick, `0x02` = Gradual, `0x03` = countdown (Triggle). |
+| 5 | 1 | `speed` | Per-kind secondary parameter. For `kind=0x01` (Flick) and `kind=0x02` (Gradual) this is the transition speed. For `kind=0x00` and `kind=0x03` it is `0x00`. |
+| 6 | 1 | `sec` | For countdowns (`kind=0x03`): duration in whole minutes. Otherwise `0x00`. |
 | 7 | 1 | `act` | Enable flag. `0x01` = active, `0x00` = disabled but retained. |
 | 8-9 | 2 | `target` | Target device or group address (little-endian). Groups use `0x8000 \| id`. |
 | 10-14 | 5 | `state` | Kind-dependent state bytes. See below. |
@@ -750,16 +751,20 @@ The `ff ff ff` tail means "don't change mode/colour".
 
 ### Alarm Types
 
-1. **Countdown timer** (`type=0x0003`): fires after a duration in minutes.
-   Uses the `id=0xc9` convention. **OFF-only** — the firmware hardcodes all
-   state bytes to zero. A "countdown to ON" must use a regular one-shot timer
-   instead.
+1. **Countdown timer** (`kind=0x03`): fires after a duration in minutes
+   given by `sec`. Uses the `id=0xc9` convention. **OFF-only** — the
+   firmware hardcodes all state bytes to zero. A "countdown to ON" must use
+   a regular one-shot timer instead.
 
-2. **One-shot timer** (`type=0x0000, repeat=0x00`): fires once at the
+2. **One-shot timer** (`kind=0x00, repeat=0x00`): fires once at the
    specified UTC hour:minute. Minute-level precision (no seconds field).
 
-3. **Recurring schedule** (`type=0x0000, repeat!=0x00`): fires on the
+3. **Recurring schedule** (`kind=0x00, repeat!=0x00`): fires on the
    specified weekdays at the given UTC hour:minute.
+
+4. **Flick** (`kind=0x01`) and **Gradual** (`kind=0x02`): transition-style
+   firings (e.g. flicker effect, gradual fade) for capable devices. The
+   `speed` byte (offset 5) sets the transition rate.
 
 ### Enable/Disable Toggle
 
