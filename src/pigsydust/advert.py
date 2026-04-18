@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .const import MANUFACTURER_ID
+from .device_class import DeviceClass
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ class PixieAdvert:
     major_type_flags: MajorTypeFlags
     minor_type: int
     raw: bytes
+    device_class: DeviceClass | None = None
 
 
 def parse_pixie_advert(
@@ -87,4 +89,5 @@ def parse_pixie_advert(
         major_type_flags=MajorTypeFlags.from_byte(major),
         minor_type=minor,
         raw=bytes(data),
+        device_class=DeviceClass.from_minor_type(minor),
     )

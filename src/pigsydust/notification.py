@@ -7,17 +7,28 @@ from dataclasses import dataclass
 
 from .const import OP_STATUS_BROADCAST_RESP, OP_STATUS_POLL_RESP
 from .crypto import decrypt, notification_nonce
+from .device_class import DeviceClass
 
 
 @dataclass
 class DeviceStatus:
-    """Decoded status of a mesh device."""
+    """Decoded status of a mesh device.
+
+    ``minor_type``, ``device_class``, and ``raw_manufacturer_data`` come
+    from the scan advertisement, not the status notification.  The
+    notification path leaves them ``None``; downstream code that also
+    sees adverts (e.g. a Home Assistant coordinator) is responsible for
+    correlating and populating them.
+    """
 
     address: int
     is_on: bool
     major_type: int
     mac: bytes
     routing_metric: int = 0
+    minor_type: int | None = None
+    device_class: DeviceClass | None = None
+    raw_manufacturer_data: bytes | None = None
 
 
 @dataclass

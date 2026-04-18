@@ -1,0 +1,91 @@
+# SAL Pixie DeviceType → (type, stype) mapping
+# Extracted from libapp.so v2.15.2375 (Dart 3.3.3, getTypeStype @ 0xb3b5f8)
+# (type << 8) | stype is the 16-bit big-endian value at bytes [15..16]
+# of HA's manufacturer_data[0x0211] (i.e. raw Skytone bytes [11..12]).
+
+idx  enum              type  stype    BE16     hex
+--------------------------------------------------
+  1  BRIDGE               2     22     534  0x0216
+  2  BRIDGE_G2            2      4     516  0x0204
+  3  SWITCH              44     22   11286  0x2c16
+  4  desktop             44     24   11288  0x2c18
+  5  laptop              44     26   11290  0x2c1a
+  6  TSWITCH             42     24   10776  0x2a18
+  7  DIMMER              46     22   11798  0x2e16
+  8  DIMMER_G2           46     24   11800  0x2e18
+  9  DIMMER_G3           46     26   11802  0x2e1a
+ 10  RFD                 40     26   10266  0x281a
+ 11  STRIP_W             48      4   12292  0x3004
+ 12  FCS                 48      6   12294  0x3006
+ 13  STRIP_RGB           54      4   13828  0x3604
+ 14  FCR                 54      6   13830  0x3606
+ 15  POL                  2     14     526  0x020e
+ 16  SPO2                 4     16    1040  0x0410
+ 17  SPO3                 4     16    1040  0x0410
+ 18  DRC                 20      4    5124  0x1404
+ 19  BSC                 22      4    5636  0x1604
+ 21  FAN_CT             108     30   27678  0x6c1e
+ 22  FAN_ONLY            12     30    3102  0x0c1e
+ 23  FAN_CT9            114     30   29214  0x721e
+ 24  FAN_ONLY9           18     30    4638  0x121e
+ 25  VFAN_CT            106     30   27166  0x6a1e
+ 26  VFAN_ONLY           10     30    2590  0x0a1e
+ 27  BFAN_ONLY           14     96    3680  0x0e60
+ 28  STRIP2_RGBCCT       52      8   13320  0x3408
+ 29  STRIP2_RGB          54      8   13832  0x3608
+ 30  STRIP2_CCT          50      8   12808  0x3208
+ 31  RGB_X               54    198   14022  0x36c6
+ 32  IR36                60      2   15362  0x3c02
+ 33  IR12                60      4   15364  0x3c04
+ 34  SMR                 60      6   15366  0x3c06
+ 35  TSWITCHG2           42     26   10778  0x2a1a
+ 36  RFD_CT              50     26   12826  0x321a
+ 37  DRS                 60     20   15380  0x3c14
+ 38  DRSM2               60     22   15382  0x3c16
+ 39  DRSM3               60     24   15384  0x3c18
+ 40  DM10                48     96   12384  0x3060
+ 41  DALI_DT6            48     98   12386  0x3062
+ 42  GDC1                24      2    6146  0x1802
+ 43  GDC1_SW             24      4    6148  0x1804
+ 44  GDC1_SL             24      6    6150  0x1806
+ 45  GDC1_W              24     16    6160  0x1810
+ 46  GDC2                24     34    6178  0x1822
+ 47  GDC1_M2             26      2    6658  0x1a02
+ 48  GDC1_M2W            26      4    6660  0x1a04
+ 49  GDC1_M2L            26      6    6662  0x1a06
+ 50  RFD2                48    104   12392  0x3068
+ 51  RFD2_CT             50    104   12904  0x3268
+ 53  RCT_W               48    100   12388  0x3064
+ 54  RCT_CCT             50    100   12900  0x3264
+ 55  RCT_RGB             54    100   13924  0x3664
+ 56  RCT_RGBW            52    100   13412  0x3464
+ 57  RCT_RGBCCT          56    100   14436  0x3864
+ 58  ZCL                 16    108    4204  0x106c
+ 59  ACF_VRV              4    102    1126  0x0466
+ 60  ACF_DUCTED           2    102     614  0x0266
+ 70  SGB                  2     28     540  0x021c
+ 72  SGB3               102     16   26128  0x6610
+ 73  SGBX                 4    104    1128  0x0468
+ 74  SGBX2                4    106    1130  0x046a
+ 75  SGBX0              106    106   27242  0x6a6a
+ 80  DELAY            19998  19998  5135902  0x4e5e1e
+
+# Indices that take the default branch (no entry returned by getTypeStype):
+#   these are routed through _getTypeStypeP3rd (third-party fallback).
+#     0  0x00  UNKNOW
+#    20  0x14  PCP5
+#    52  0x34  RFD2_SCAN
+#    61  0x3d  ACF_RS8
+#    62  0x3e  CAP
+#    63  0x3f  MTW
+#    64  0x40  MTW2_AN
+#    65  0x41  MTW2_AL
+#    66  0x42  MRC
+#    67  0x43  DIAL
+#    68  0x44  STC
+#    69  0x45  SIC
+#    71  0x47  CAP3
+#    76  0x4c  SFI_8266
+#    77  0x4d  SFI_825X
+#    78  0x4e  DV02
+#    79  0x4f  SONOS
