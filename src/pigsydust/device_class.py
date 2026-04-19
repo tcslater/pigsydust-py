@@ -1,17 +1,11 @@
-"""Pixie device-class enum (``minjorType`` in the SAL Pixie app's terms).
+"""Pixie internal device-class enum.
 
-The 16-bit big-endian value at bytes ``[15..16]`` of the manufacturer-data
-blob identifies the hardware class — wall switch vs dimmer vs RGB strip
-etc.  The mapping below was extracted from ``libapp.so`` (SAL PIXIE
-Android v2.15.2375) with `blutter
-<https://github.com/worawit/blutter>`_; see
-``scripts/extract_devicetype_table.py`` and
-``scripts/devicetype_table.txt`` for the regeneration workflow when SAL
-ships a new app release.
+``(type << 8) | stype`` values for the Pixie device-class identifiers.
 
-Identifiers here are the canonical, presentation-neutral protocol keys.
-Human-readable names are the consumer's concern — e.g. the Home Assistant
-integration maps them to localised strings via its translation files.
+These do **not** match the wire-level ``(type, stype)`` carried in
+advertisements (bytes 6-7) — see ``docs/PROTOCOL-REFERENCE.md``. Do not
+look this enum up against advertisement data; it is preserved for
+reference only.
 """
 
 from __future__ import annotations
@@ -20,7 +14,7 @@ from enum import IntEnum
 
 
 class DeviceClass(IntEnum):
-    """Pixie device class, keyed on the 16-bit BE int at advert bytes [15..16]."""
+    """Pixie internal device class. Not the wire encoding — see module docstring."""
 
     BRIDGE = 0x0216
     BRIDGE_G2 = 0x0204
@@ -38,8 +32,8 @@ class DeviceClass(IntEnum):
     FCR = 0x3606
     POL = 0x020E
     SPO2 = 0x0410
-    # SPO3 shares SPO2's encoding (0x0410) in the Dart table; IntEnum
-    # would make it an alias anyway.  Callers see SPO2.name for both.
+    # SPO3 shares SPO2's encoding (0x0410); IntEnum would make it an
+    # alias anyway. Callers see SPO2.name for both.
     DRC = 0x1404
     BSC = 0x1604
     FAN_CT = 0x6C1E
@@ -86,21 +80,5 @@ class DeviceClass(IntEnum):
     SGBX = 0x0468
     SGBX2 = 0x046A
     SGBX0 = 0x6A6A
-    # DELAY (idx 80) returns (19998, 19998) from getTypeStype — a sentinel
-    # that can't be expressed as (type << 8) | stype in 16 bits, so it is
-    # intentionally omitted.  It cannot appear in a 16-bit advert field.
-
-    @classmethod
-    def from_minor_type(cls, value: int | None) -> DeviceClass | None:
-        """Look up the device class for a 16-bit ``minor_type`` value.
-
-        Returns ``None`` if ``value`` is ``None`` or not a known class.
-        Unknown values are common — SAL periodically ships new hardware
-        and the enum needs to be regenerated from a fresh app release.
-        """
-        if value is None:
-            return None
-        try:
-            return cls(value)
-        except ValueError:
-            return None
+    # DELAY is a sentinel value (19998, 19998) that can't fit in a 16-bit
+    # (type << 8) | stype encoding, so it is intentionally omitted.

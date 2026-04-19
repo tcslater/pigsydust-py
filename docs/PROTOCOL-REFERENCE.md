@@ -1,7 +1,7 @@
 # SAL Pixie / Telink BLE Mesh Protocol Reference
 
-A complete protocol reference for SAL Pixie BLE mesh wall switches, based on
-reverse-engineering of the PIXIE iOS app and verified against live hardware.
+A complete protocol reference for SAL Pixie BLE mesh wall switches, verified
+against live hardware.
 
 **Audience**: developers and agents building their own software stack to control
 Pixie devices over BLE, fully offline — no cloud, no hub, no app dependency.
@@ -70,22 +70,29 @@ Pixie devices advertise continuously. Relevant advertisement fields:
 
 ### Manufacturer Data Layout
 
-Bytes after the 2-byte company ID (`0x0211`):
+Pixie firmware re-emits the company ID at the start of the manufacturer-data
+buffer, so the first two bytes are a duplicate of the `0x0211` already in the
+BLE header. All offsets below are relative to the start of the buffer the
+host BLE stack hands the application:
 
 | Offset | Length | Content |
 |--------|--------|---------|
-| 0-1 | 2 | Unknown |
+| 0-1 | 2 | Echo of company ID — constant `11 02` |
 | 2-5 | 4 | MAC bytes `[5,4,3,2]` in little-endian order |
-| 14 | 1 | Packed status byte (the app calls it `majorType`) — see below |
-| 15-16 | 2 | Device class — 16-bit big-endian `(type << 8) \| stype` |
-| 17-20 | 4 | Mesh network ID (little-endian 32-bit) |
+| 6 | 1 | `type` — wire-level device class (halved — see below) |
+| 7 | 1 | `stype` — wire-level device class sub-identifier (halved) |
+| 8 | 1 | Packed status byte (online / alarmDev / firmware version) |
+| 9 | 1 | Mesh device address (low byte = `MAC[5]`) |
+| 10 | 1 | Reserved (always `0x00`) |
+| 11-14 | 4 | Mesh network ID (little-endian 32-bit) |
+| 15+ | — | Zero padding |
 
 The **MAC bytes** at offset 2-5 provide the real hardware MAC address on
 platforms (like macOS/iOS) where the OS randomises BLE addresses. Extract
 the full 6-byte MAC by combining these 4 bytes with the remaining 2 bytes
-from the BLE address or Device Information Service.
+(typically `00:21:`) from the Device Information Service.
 
-#### Byte 14 — packed status
+#### Byte 8 — packed status
 
 A packed flag/version byte:
 
@@ -95,14 +102,42 @@ A packed flag/version byte:
 | 1 | `alarmDev` — set while the device is participating in an alarm group/scene |
 | 2-7 | 6-bit firmware version |
 
-#### Bytes 15-16 — device class
+The same byte appears at offset 6 of a decrypted `0xdb` status response
+payload (see [Status & Polling](#status--polling)).
 
-A 16-bit big-endian value encoding the device class as `(type << 8) | stype`.
-For example, a wall switch is `(type=44, stype=22)` = `0x2c16`; a Gen-3
-dimmer is `(46, 26)` = `0x2e1a`. The full table is enumerated in
+#### Bytes 6-7 — device class (wire-halved)
+
+The wire bytes carry **halved** values of the canonical device-class
+identifier. To recover the identifier and look up the device class:
+
+```
+type  = wire[6] * 2
+stype = wire[7] * 2
+key   = type * 1000 + stype
+```
+
+The full table of `(type, stype) → device class` mappings is enumerated in
 [Device Classes](#device-classes).
 
-#### Bytes 17-20 — mesh network ID
+For example, a Gen-2 wall switch advertises `wire[6]=22, wire[7]=12` →
+`(type=44, stype=24)` → key `44024` → `SWITCH_G2`.
+
+> **Important**: the `*2` halving rule has been
+> directly verified against **`SWITCH_G2` only** (wire `(22, 12)` ↔
+> identifier `(44, 24)`). It has **not** been confirmed for any other
+> device class. The fact that all identifiers in the
+> [Device Classes](#device-classes) table have even `type` and `stype` is
+> circumstantial — consistent with the rule, but not proof. The wire-bytes
+> column in that table is computed by applying the rule, not by direct
+> observation, and may be wrong for any individual entry. If you have a
+> non-`SWITCH_G2` device, please capture its advertisement and either
+> confirm or correct the table.
+>
+> Implementations should apply `*2` first; if the lookup misses, fall back
+> to the raw wire bytes as a defensive measure. The same caveat applies to
+> the `ACF_RS8` shortcut above — it has not been wire-confirmed.
+
+#### Bytes 11-14 — mesh network ID
 
 A little-endian 32-bit network identifier. Nodes use this to recognise
 members of the same home network in the advertisement stream.
@@ -136,7 +171,7 @@ The primary mesh service. Four characteristics:
 ### Service 2: Mesh2 Service (UUID `19200d0c-0b0a-0908-0706-050403020100`)
 
 A secondary service with one characteristic at UUID suffix `1921`. Likely
-for a v2 mesh protocol. Not used by current firmware or the Pixie app.
+for a v2 mesh protocol. Not used by current firmware.
 
 ---
 
@@ -146,8 +181,7 @@ for a v2 mesh protocol. Not used by current firmware or the Pixie app.
 
 Two shared values are needed:
 - **Mesh name**: a string, often `"Smart Light"` (the firmware default).
-- **Mesh password**: a numeric string (the `netID` displayed in the app's
-  "Share Home" screen).
+- **Mesh password**: a numeric string — the mesh's `netID`.
 
 Both are zero-padded to 16 bytes for cryptographic operations.
 
@@ -169,8 +203,8 @@ session key, and per-packet AES-CCM.
 
 ### Login Sequence
 
-1. **Client generates `rand_a`** — 8 random bytes. (The Pixie iOS app uses a
-   fixed value; your implementation should use true random bytes.)
+1. **Client generates `rand_a`** — 8 random bytes. Implementations must use
+   true random bytes.
 
 2. **Client computes `enc_req`**:
    ```
@@ -369,8 +403,8 @@ group_addr(2 LE) || 0xe7 || 69 69 || state(1) 00 10 00 00 00 || group_addr(2 LE)
 - The group address appears twice: as `dst` and in the data tail
 - `0x10` between state and group tail is treated as a constant
 
-Both `0xed` and `0xe7` work for group addressing. The app uses `0xe7` for
-group toggles.
+Both `0xed` and `0xe7` work for group addressing. Implementations may
+prefer `0xe7` for group toggles.
 
 ### Status & Polling
 
@@ -408,9 +442,9 @@ dst(2 LE) || 0xda || 11 02 || 10 00
 | 0 | `0xdb` (opcode) |
 | 1-2 | `0x11 0x02` (fixed) |
 | 3 | `0x00` (padding) |
-| 4 | Product revision |
-| 5 | Product class |
-| 6 | Packed status byte — same layout as advert byte 14 (bit 0 = online, bit 1 = alarmDev, bits 2-7 = firmware version). |
+| 4 | `type` — wire-level device class (halved — see [Device Classes](#device-classes)) |
+| 5 | `stype` — wire-level device class sub-identifier (halved) |
+| 6 | Packed status byte — same layout as advert byte 8 (bit 0 = online, bit 1 = alarmDev, bits 2-7 = firmware version). |
 | 7-10 | Source MAC bytes `[5,4,3,2]` |
 | 11 | Mesh routing metric (variable per-frame, likely hop count) |
 | 12 | On/off state: `0x00` = off, `0x01` = on |
@@ -517,9 +551,9 @@ address to human-readable name is purely client-local. Different app installs
 on different devices can have completely divergent group names pointing at the
 same underlying group addresses on the hardware.
 
-"Creating" a group in the app picks the next free group address, names it
-locally, and writes membership to chosen devices via `0xef`. The app uses
-`0xdd` probes to find an unused group address before creating.
+To create a group, a client picks the next free group address, names it
+locally, and writes membership to chosen devices via `0xef`. Use `0xdd`
+probes to find an unused group address before creating.
 
 ### LED Indicator Control
 
@@ -542,7 +576,7 @@ dst(2 LE) || 0xff || 69 69 || b_ch(1) b_lvl(1) o_ch(1) o_lvl(1) || 0x00 * pad
 | 2 | `o_ch` | `0xff` = orange channel select, `0x00` = don't touch orange |
 | 3 | `o_lvl` | Lower nibble = brightness 0-15. Upper nibble is ignored |
 
-> **Critical rule**: each packet must update **exactly one channel**.
+> **Critical**: each packet must update **exactly one channel**.
 > The untouched channel's bytes must be zeroed.
 >
 > - Blue ON:   `a0 12 00 00`
@@ -708,7 +742,6 @@ increasing) rather than overwriting in-place.
 ### Sunrise / Sunset (0xd0)
 
 A 3-fragment opcode for pushing compressed sunrise/sunset schedule data.
-The frame layout is documented from firmware analysis:
 
 **Per fragment** (3 frames, each 15-byte plaintext):
 ```
@@ -726,7 +759,7 @@ The 16-byte alarm record carried by `0xcc` write and `0xc2` query responses:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | 1 | `id` (`no`) | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. (Field name in `alarm2json` output is `no`.) |
+| 0 | 1 | `id` | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. |
 | 1 | 1 | `repeat` | Weekday bitmask (UTC-rotated). `bit0`=Mon, `bit1`=Tue, ... `bit6`=Sun. `0x7f`=daily, `0x1f`=Mon-Fri, `0x00`=one-shot. See [Timezone & Weekday Rotation](#timezone--weekday-rotation). |
 | 2 | 1 | `hour` | Fire hour in **UTC** (0-23). |
 | 3 | 1 | `min` | Fire minute in **UTC** (0-59). |
@@ -875,78 +908,100 @@ the value is wrong.
 
 ## Device Classes
 
-The 16-bit big-endian value at advert bytes `[15..16]` identifies the device
-class as `(type << 8) | stype`. Known classes:
+The wire bytes at advert offsets `[6..7]` (and at offsets `[1..2]` of a
+decrypted `0xdb` status response) carry halved values; the canonical
+identifier is `(type, stype) = (wire[6]*2, wire[7]*2)`. The lookup key
+`type * 1000 + stype` maps to the device class below.
 
-| Identifier | (type, stype) | BE16 |
-|------------|--------------:|:----:|
-| `BRIDGE` | (2, 22) | `0x0216` |
-| `BRIDGE_G2` | (2, 4) | `0x0204` |
-| `SWITCH` | (44, 22) | `0x2c16` |
-| `TSWITCH` | (42, 24) | `0x2a18` |
-| `TSWITCHG2` | (42, 26) | `0x2a1a` |
-| `DIMMER` | (46, 22) | `0x2e16` |
-| `DIMMER_G2` | (46, 24) | `0x2e18` |
-| `DIMMER_G3` | (46, 26) | `0x2e1a` |
-| `RFD` | (40, 26) | `0x281a` |
-| `RFD_CT` | (50, 26) | `0x321a` |
-| `RFD2` | (48, 104) | `0x3068` |
-| `RFD2_CT` | (50, 104) | `0x3268` |
-| `STRIP_W` | (48, 4) | `0x3004` |
-| `STRIP_RGB` | (54, 4) | `0x3604` |
-| `STRIP2_RGBCCT` | (52, 8) | `0x3408` |
-| `STRIP2_RGB` | (54, 8) | `0x3608` |
-| `STRIP2_CCT` | (50, 8) | `0x3208` |
-| `RGB_X` | (54, 198) | `0x36c6` |
-| `FCS` | (48, 6) | `0x3006` |
-| `FCR` | (54, 6) | `0x3606` |
-| `POL` | (2, 14) | `0x020e` |
-| `SPO2` | (4, 16) | `0x0410` |
-| `SPO3` | (4, 16) | `0x0410` |
-| `DRC` | (20, 4) | `0x1404` |
-| `BSC` | (22, 4) | `0x1604` |
-| `FAN_ONLY` | (12, 30) | `0x0c1e` |
-| `FAN_CT` | (108, 30) | `0x6c1e` |
-| `FAN_ONLY9` | (18, 30) | `0x121e` |
-| `FAN_CT9` | (114, 30) | `0x721e` |
-| `VFAN_ONLY` | (10, 30) | `0x0a1e` |
-| `VFAN_CT` | (106, 30) | `0x6a1e` |
-| `BFAN_ONLY` | (14, 96) | `0x0e60` |
-| `IR36` | (60, 2) | `0x3c02` |
-| `IR12` | (60, 4) | `0x3c04` |
-| `SMR` | (60, 6) | `0x3c06` |
-| `DRS` | (60, 20) | `0x3c14` |
-| `DRSM2` | (60, 22) | `0x3c16` |
-| `DRSM3` | (60, 24) | `0x3c18` |
-| `DM10` | (48, 96) | `0x3060` |
-| `DALI_DT6` | (48, 98) | `0x3062` |
-| `GDC1` | (24, 2) | `0x1802` |
-| `GDC1_SW` | (24, 4) | `0x1804` |
-| `GDC1_SL` | (24, 6) | `0x1806` |
-| `GDC1_W` | (24, 16) | `0x1810` |
-| `GDC2` | (24, 34) | `0x1822` |
-| `GDC1_M2` | (26, 2) | `0x1a02` |
-| `GDC1_M2W` | (26, 4) | `0x1a04` |
-| `GDC1_M2L` | (26, 6) | `0x1a06` |
-| `RCT_W` | (48, 100) | `0x3064` |
-| `RCT_CCT` | (50, 100) | `0x3264` |
-| `RCT_RGB` | (54, 100) | `0x3664` |
-| `RCT_RGBW` | (52, 100) | `0x3464` |
-| `RCT_RGBCCT` | (56, 100) | `0x3864` |
-| `ZCL` | (16, 108) | `0x106c` |
-| `ACF_VRV` | (4, 102) | `0x0466` |
-| `ACF_DUCTED` | (2, 102) | `0x0266` |
-| `SGB` | (2, 28) | `0x021c` |
-| `SGB3` | (102, 16) | `0x6610` |
-| `SGBX` | (4, 104) | `0x0468` |
-| `SGBX2` | (4, 106) | `0x046a` |
-| `SGBX0` | (106, 106) | `0x6a6a` |
-| `DELAY` | (19998, 19998) | (synthetic) |
+A wire `stype` byte (offset 7) of `0x39` (= 57, corresponding to identifier
+`stype = 114`) is a special case: the device is always `ACF_RS8`, regardless
+of the wire `type` byte. This shortcut bypasses the table lookup entirely.
 
-Identifiers `UNKNOW`, `PCP5`, `RFD2_SCAN`, `ACF_RS8`, `CAP`, `MTW`,
-`MTW2_AN`, `MTW2_AL`, `MRC`, `DIAL`, `STC`, `SIC`, `CAP3`, `SFI_8266`,
-`SFI_825X`, `DV02`, `SONOS` are resolved via a third-party fallback path and
-do not have static `(type, stype)` encodings.
+| (type, stype) | Wire (b6, b7) | Lookup key | Device class |
+|--------------:|:-------------:|:----------:|--------------|
+| (0, 106) | (0, 53) | 106 | `SGBX0` |
+| (2, 4) | (1, 2) | 2004 | `BRIDGE_G2` |
+| (2, 14) | (1, 7) | 2014 | `POL` |
+| (2, 22) | (1, 11) | 2022 | `BRIDGE` |
+| (2, 28) | (1, 14) | 2028 | `SGB` |
+| (2, 102) | (1, 51) | 2102 | `ACF_DUCTED` |
+| (4, 16) | (2, 8) | 4016 | `SPO3` |
+| (4, 102) | (2, 51) | 4102 | `ACF_VRV` |
+| (4, 104) | (2, 52) | 4104 | `SGBX` |
+| (4, 106) | (2, 53) | 4106 | `SGBX2` |
+| (10, 30) | (5, 15) | 10030 | `VFAN_ONLY` |
+| (12, 30) | (6, 15) | 12030 | `FAN_ONLY` |
+| (14, 96) | (7, 48) | 14096 | `BFAN_ONLY` |
+| (16, 108) | (8, 54) | 16108 | `ZCL` |
+| (18, 30) | (9, 15) | 18030 | `FAN_ONLY9` |
+| (20, 4) | (10, 2) | 20004 | `DRC` |
+| (22, 4) | (11, 2) | 22004 | `BSC` |
+| (24, 2) | (12, 1) | 24002 | `GDC1` |
+| (24, 4) | (12, 2) | 24004 | `GDC1_SW` |
+| (24, 6) | (12, 3) | 24006 | `GDC1_SL` |
+| (24, 16) | (12, 8) | 24016 | `GDC1_W` |
+| (24, 34) | (12, 17) | 24034 | `GDC2` |
+| (26, 2) | (13, 1) | 26002 | `GDC1_M2` |
+| (26, 4) | (13, 2) | 26004 | `GDC1_M2W` |
+| (26, 6) | (13, 3) | 26006 | `GDC1_M2L` |
+| (34, 48) | (17, 24) | 34048 | `DV02` |
+| (40, 26) | (20, 13) | 40026 | `RFD` |
+| (40, 104) | (20, 52) | 40104 | `RFD2_SCAN` |
+| (42, 24) | (21, 12) | 42024 | `TSWITCH` |
+| (42, 26) | (21, 13) | 42026 | `TSWITCHG2` |
+| (42, 96) | (21, 48) | 42096 | `ECL_AC` |
+| (44, 2) | (22, 1) | 44002 | `SWITCH` |
+| (44, 22) | (22, 11) | 44022 | `SWITCH` |
+| (44, 24) | (22, 12) | 44024 | `SWITCH_G2` |
+| (44, 26) | (22, 13) | 44026 | `SWITCH_G3` |
+| (46, 22) | (23, 11) | 46022 | `DIMMER` |
+| (46, 24) | (23, 12) | 46024 | `DIMMER_G2` |
+| (46, 26) | (23, 13) | 46026 | `DIMMER_G3` |
+| (48, 4) | (24, 2) | 48004 | `STRIP_W` |
+| (48, 6) | (24, 3) | 48006 | `FCS` |
+| (48, 64) | (24, 32) | 48064 | `SFI_8266` |
+| (48, 66) | (24, 33) | 48066 | `SFI_825X` |
+| (48, 96) | (24, 48) | 48096 | `DM10` |
+| (48, 98) | (24, 49) | 48098 | `DALI_DT6` |
+| (48, 100) | (24, 50) | 48100 | `RCT_W` |
+| (48, 104) | (24, 52) | 48104 | `RFD2` |
+| (50, 8) | (25, 4) | 50008 | `STRIP2_CCT` |
+| (50, 26) | (25, 13) | 50026 | `RFD_CT` |
+| (50, 100) | (25, 50) | 50100 | `RCT_CCT` |
+| (50, 104) | (25, 52) | 50104 | `RFD2_CT` |
+| (52, 8) | (26, 4) | 52008 | `STRIP2_RGBCCT` |
+| (52, 100) | (26, 50) | 52100 | `RCT_RGBW` |
+| (54, 4) | (27, 2) | 54004 | `STRIP_RGB` |
+| (54, 6) | (27, 3) | 54006 | `FCR` |
+| (54, 8) | (27, 4) | 54008 | `STRIP2_RGB` |
+| (54, 100) | (27, 50) | 54100 | `RCT_RGB` |
+| (54, 198) | (27, 99) | 54198 | `RGB_X` |
+| (56, 100) | (28, 50) | 56100 | `RCT_RGBCCT` |
+| (60, 2) | (30, 1) | 60002 | `IR36` |
+| (60, 4) | (30, 2) | 60004 | `IR12` |
+| (60, 6) | (30, 3) | 60006 | `SMR` |
+| (60, 20) | (30, 10) | 60020 | `DRS` |
+| (60, 22) | (30, 11) | 60022 | `DRSM2` |
+| (60, 24) | (30, 12) | 60024 | `DRSM3` |
+| (102, 2) | (51, 1) | 102002 | `CAP` |
+| (102, 4) | (51, 2) | 102004 | `MTW` |
+| (102, 6) | (51, 3) | 102006 | `STC` |
+| (102, 8) | (51, 4) | 102008 | `MTW2_AL` |
+| (102, 10) | (51, 5) | 102010 | `MTW2_AN` |
+| (102, 12) | (51, 6) | 102012 | `MRC` |
+| (102, 14) | (51, 7) | 102014 | `CAP3` |
+| (102, 16) | (51, 8) | 102016 | `SGB3` |
+| (102, 20) | (51, 10) | 102020 | `SIC` |
+| (102, 40) | (51, 20) | 102040 | `DIAL` |
+| (106, 30) | (53, 15) | 106030 | `VFAN_CT` |
+| (108, 30) | (54, 15) | 108030 | `FAN_CT` |
+| (114, 30) | (57, 15) | 114030 | `FAN_CT9` |
+| (180, 2) | (90, 1) | 180002 | `SONOS` |
+| (`*`, 114) | (`*`, 57) | — | `ACF_RS8` (matched by `stype==0x39` regardless of `type`) |
+
+A pseudo-class `DELAY` exists as a sentinel (synthetic key `20017998`) and
+does not appear on the wire. Unknown wire values fall back to a generic
+"unknown device" handling — the lookup returns no class.
 
 ---
 
