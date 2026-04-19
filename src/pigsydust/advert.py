@@ -1,13 +1,12 @@
 """Parser for the SAL Pixie BLE manufacturer-data advertisement.
 
 The manufacturer blob (company ID 0x0211) carries the mesh device's MAC,
-a packed flag byte the Pixie app labels ``majorType`` (online /
-alarmDev / firmware version), and a 16-bit value the app labels
-``minjorType`` (sic) that almost certainly identifies the device class
-(wall switch vs dimmer vs RGB strip etc.).
+a wire-level ``(type, stype)`` device-class identifier, a packed status
+byte (online / alarmDev / firmware version), and a 4-byte mesh network
+identifier.
 
-See ``ha-pigsydust/PLAN.md`` Stage 0 for the disassembly that
-established this layout.
+Layout verified against live BLE scans and decrypted ``0xdb`` status
+responses (see ``ha-pigsydust/PLAN.md`` Stage 0).
 """
 
 from __future__ import annotations
@@ -15,21 +14,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .const import MANUFACTURER_ID
-from .device_class import DeviceClass
 
 
 @dataclass(frozen=True)
-class MajorTypeFlags:
-    """Decoded bit layout of the ``majorType`` byte (byte[14] of the blob).
+class StatusByteFlags:
+    """Decoded bit layout of the packed status byte (advert byte[8]).
 
-    Per disassembly of ``bt_struct.framework``::
+    Bit layout::
 
         bit 0    -> online flag
         bit 1    -> alarmDev flag (participates in an alarm group/scene)
         bits 2-7 -> 6-bit firmware version
 
-    The Pixie app's name ``majorType`` is misleading — this is *not* a
-    device-class enum.  Device class lives in :attr:`PixieAdvert.minor_type`.
+    The same byte appears at offset 3 of a decrypted ``0xdb`` status
+    response payload.
     """
 
     online: bool
@@ -37,7 +35,7 @@ class MajorTypeFlags:
     version: int
 
     @classmethod
-    def from_byte(cls, b: int) -> MajorTypeFlags:
+    def from_byte(cls, b: int) -> StatusByteFlags:
         return cls(
             online=bool(b & 0x01),
             alarm_dev=bool((b >> 1) & 0x01),
@@ -47,14 +45,36 @@ class MajorTypeFlags:
 
 @dataclass(frozen=True)
 class PixieAdvert:
-    """Parsed fields from a Pixie manufacturer-data advertisement."""
+    """Parsed fields from a Pixie manufacturer-data advertisement.
+
+    The blob layout (after the ``0x0211`` company ID is stripped by the
+    BLE stack) is::
+
+        [0..1]   echo of company ID (constant ``11 02``)
+        [2..5]   MAC octets [5..2] in reverse — combine with ``00:21:`` for full MAC
+        [6]      type — wire-level device class identifier
+        [7]      stype — wire-level device class sub-identifier
+        [8]      packed status byte (online / alarmDev / version)
+        [9]      mesh device address (= MAC[5])
+        [10]     reserved (always ``0x00``)
+        [11..14] mesh network identifier (constant per home network)
+        [15..]   zero padding
+
+    For wall switches, ``(type, stype) = (0x16, 0x0c) = (22, 12)`` and the
+    network identifier is mesh-specific. ``(type, stype)`` are the same
+    fields ``bt_struct``'s ``dataParse`` fun=0x1b decodes from a ``0xdb``
+    response; they are *not* the same as the values returned by the
+    Dart-internal ``getTypeStype()`` enum.
+    """
 
     mac: bytes
-    major_type: int
-    major_type_flags: MajorTypeFlags
-    minor_type: int
+    type: int
+    stype: int
+    status_byte: int
+    status_flags: StatusByteFlags
+    mesh_address: int
+    network_id: bytes
     raw: bytes
-    device_class: DeviceClass | None = None
 
 
 def parse_pixie_advert(
@@ -63,31 +83,24 @@ def parse_pixie_advert(
     """Extract :class:`PixieAdvert` from a BLE manufacturer-data dict.
 
     Returns ``None`` if the manufacturer ID isn't present or the blob is
-    too short to hold ``minorType`` (bytes[15..16]).  Callers that only
-    need the MAC can accept a shorter blob by reading
-    :attr:`PixieAdvert.mac` after a successful parse; this helper
-    deliberately requires the full fixed-offset range so that every
-    field on the returned object is well-defined.
+    too short to hold the network identifier (bytes [11..14]).
     """
     if manufacturer_data is None:
         return None
     data = manufacturer_data.get(MANUFACTURER_ID)
-    if data is None or len(data) < 17:
+    if data is None or len(data) < 15:
         return None
 
-    # MAC layout: the blob carries four MAC octets at bytes 2..5 in the
-    # order {mac[5], mac[4], mac[3], mac[2]}.  mac[0] and mac[1] are
-    # always 0 for Pixie devices.
     mac = bytes([0, 0, data[5], data[4], data[3], data[2]])
-
-    major = data[14]
-    minor = int.from_bytes(data[15:17], "big")
+    status = data[8]
 
     return PixieAdvert(
         mac=mac,
-        major_type=major,
-        major_type_flags=MajorTypeFlags.from_byte(major),
-        minor_type=minor,
+        type=data[6],
+        stype=data[7],
+        status_byte=status,
+        status_flags=StatusByteFlags.from_byte(status),
+        mesh_address=data[9],
+        network_id=bytes(data[11:15]),
         raw=bytes(data),
-        device_class=DeviceClass.from_minor_type(minor),
     )

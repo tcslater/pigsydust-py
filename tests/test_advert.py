@@ -2,75 +2,101 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pigsydust.advert import (
-    MajorTypeFlags,
     PixieAdvert,
+    StatusByteFlags,
     parse_pixie_advert,
 )
 
 
-def _make_blob(
-    major: int = 0x45, minor: int = 0x0011, mac_tail: bytes = b"\x12\x34\x56\x78"
-) -> bytes:
-    """Build a 17-byte Skytone manufacturer-data blob.
+# A real wall-switch advert captured from a Pixie mesh. Used as the canonical
+# fixture so behaviour mirrors actual hardware.
+REAL_WALL_SWITCH_BLOB = bytes.fromhex(
+    "11027d265d4d160c457d001ae71d19000000000000000000000000"
+)
+# That blob comes from MAC 00:21:4D:5D:26:7D (Lounge), packed status 0x45.
 
-    Layout (offsets based on observed wall-switch adverts):
-      0..1   header / padding (not parsed)
-      2..5   MAC octets 2..5, reversed into mac[5..2]
-      6..13  padding
-      14     majorType (packed flags)
-      15..16 minorType (16-bit BE device class)
+
+def _make_blob(
+    *,
+    mac_tail: bytes = bytes([0x4D, 0x5D, 0x26, 0x7D]),
+    type_byte: int = 0x16,
+    stype_byte: int = 0x0c,
+    status_byte: int = 0x45,
+    network_id: bytes = bytes.fromhex("1ae71d19"),
+) -> bytes:
+    """Build a 27-byte Skytone manufacturer-data blob matching the real layout.
+
+    ``mac_tail`` is the four MSB-to-LSB octets of the MAC suffix
+    (e.g. ``[0x4D, 0x5D, 0x26, 0x7D]`` for ``00:21:4D:5D:26:7D``); the
+    blob stores them in reverse at offsets 2..5.
     """
-    blob = bytearray(17)
+    blob = bytearray(27)
+    blob[0] = 0x11
+    blob[1] = 0x02
     blob[2] = mac_tail[3]
     blob[3] = mac_tail[2]
     blob[4] = mac_tail[1]
     blob[5] = mac_tail[0]
-    blob[14] = major
-    blob[15] = (minor >> 8) & 0xFF
-    blob[16] = minor & 0xFF
+    blob[6] = type_byte
+    blob[7] = stype_byte
+    blob[8] = status_byte
+    blob[9] = mac_tail[3]  # mesh address = MAC[5]
+    blob[10] = 0x00
+    blob[11:15] = network_id
     return bytes(blob)
 
 
-def test_major_type_flags_0x45():
+def test_status_byte_flags_0x45():
     """0x45 = online + no alarm + version 17 (the common wall-switch value)."""
-    flags = MajorTypeFlags.from_byte(0x45)
+    flags = StatusByteFlags.from_byte(0x45)
     assert flags.online is True
     assert flags.alarm_dev is False
     assert flags.version == 0x11  # 17
 
 
-def test_major_type_flags_0x47():
+def test_status_byte_flags_0x47():
     """0x47 = online + alarmDev + version 17 (transient wall-switch value)."""
-    flags = MajorTypeFlags.from_byte(0x47)
+    flags = StatusByteFlags.from_byte(0x47)
     assert flags.online is True
     assert flags.alarm_dev is True
     assert flags.version == 0x11
 
 
-def test_major_type_flags_extremes():
-    assert MajorTypeFlags.from_byte(0x00) == MajorTypeFlags(False, False, 0)
-    assert MajorTypeFlags.from_byte(0xFF) == MajorTypeFlags(True, True, 0x3F)
+def test_status_byte_flags_extremes():
+    assert StatusByteFlags.from_byte(0x00) == StatusByteFlags(False, False, 0)
+    assert StatusByteFlags.from_byte(0xFF) == StatusByteFlags(True, True, 0x3F)
 
 
-def test_parse_pixie_advert_happy_path():
-    blob = _make_blob(major=0x45, minor=0x0011, mac_tail=bytes([0x4D, 0x5B, 0x28, 0x30]))
-    manuf = {0x0211: blob}
-
-    result = parse_pixie_advert(manuf)
+def test_parse_real_wall_switch_blob():
+    """The canonical fixture must round-trip cleanly."""
+    result = parse_pixie_advert({0x0211: REAL_WALL_SWITCH_BLOB})
 
     assert result is not None
     assert isinstance(result, PixieAdvert)
-    assert result.major_type == 0x45
-    assert result.major_type_flags.online is True
-    assert result.major_type_flags.alarm_dev is False
-    assert result.major_type_flags.version == 17
-    assert result.minor_type == 0x0011
-    # MAC: mac[0..1] = 0, mac[2] = blob[5], mac[3] = blob[4], mac[4] = blob[3], mac[5] = blob[2]
-    assert result.mac == bytes([0, 0, 0x4D, 0x5B, 0x28, 0x30])
-    assert result.raw == blob
+    assert result.type == 0x16  # 22
+    assert result.stype == 0x0c  # 12
+    assert result.status_byte == 0x45
+    assert result.status_flags.online is True
+    assert result.status_flags.alarm_dev is False
+    assert result.status_flags.version == 17
+    assert result.mac == bytes([0, 0, 0x4D, 0x5D, 0x26, 0x7D])
+    assert result.mesh_address == 0x7D
+    assert result.network_id == bytes.fromhex("1ae71d19")
+    assert result.raw == REAL_WALL_SWITCH_BLOB
+
+
+def test_parse_synthetic_blob_round_trip():
+    blob = _make_blob(
+        mac_tail=bytes([0x4D, 0x5B, 0x28, 0x90]),
+        status_byte=0x47,
+    )
+    result = parse_pixie_advert({0x0211: blob})
+
+    assert result is not None
+    assert result.mac == bytes([0, 0, 0x4D, 0x5B, 0x28, 0x90])
+    assert result.mesh_address == 0x90
+    assert result.status_flags.alarm_dev is True
 
 
 def test_parse_missing_manufacturer_id():
@@ -86,15 +112,5 @@ def test_parse_none_manufacturer_data():
 
 
 def test_parse_short_blob_rejected():
-    """Blob must be at least 17 bytes to have minor_type at [15..16]."""
-    assert parse_pixie_advert({0x0211: b"\x00" * 16}) is None
-
-
-def test_parse_minor_type_big_endian():
-    """Bytes 15..16 are interpreted big-endian."""
-    blob = _make_blob(minor=0xABCD)
-    assert blob[15] == 0xAB
-    assert blob[16] == 0xCD
-    result = parse_pixie_advert({0x0211: blob})
-    assert result is not None
-    assert result.minor_type == 0xABCD
+    """Blob must be at least 15 bytes (through the network_id field)."""
+    assert parse_pixie_advert({0x0211: b"\x00" * 14}) is None
