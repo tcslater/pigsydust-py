@@ -9,12 +9,10 @@ from pigsydust.advert import (
 )
 
 
-# A real wall-switch advert captured from a Pixie mesh. Used as the canonical
-# fixture so behaviour mirrors actual hardware.
-REAL_WALL_SWITCH_BLOB = bytes.fromhex(
+# Wall-switch advert blob — (type, stype) = (0x16, 0x0c), status 0x45.
+WALL_SWITCH_BLOB = bytes.fromhex(
     "11027d265d4d160c457d001ae71d19000000000000000000000000"
 )
-# That blob comes from MAC 00:21:4D:5D:26:7D (Lounge), packed status 0x45.
 
 
 def _make_blob(
@@ -25,10 +23,9 @@ def _make_blob(
     status_byte: int = 0x45,
     network_id: bytes = bytes.fromhex("1ae71d19"),
 ) -> bytes:
-    """Build a 27-byte Skytone manufacturer-data blob matching the real layout.
+    """Build a 27-byte manufacturer-data blob.
 
-    ``mac_tail`` is the four MSB-to-LSB octets of the MAC suffix
-    (e.g. ``[0x4D, 0x5D, 0x26, 0x7D]`` for ``00:21:4D:5D:26:7D``); the
+    ``mac_tail`` is the four MSB-to-LSB octets of the MAC suffix; the
     blob stores them in reverse at offsets 2..5.
     """
     blob = bytearray(27)
@@ -48,15 +45,15 @@ def _make_blob(
 
 
 def test_status_byte_flags_0x45():
-    """0x45 = online + no alarm + version 17 (the common wall-switch value)."""
+    """0x45 = online + no alarm + version 17."""
     flags = StatusByteFlags.from_byte(0x45)
     assert flags.online is True
     assert flags.alarm_dev is False
-    assert flags.version == 0x11  # 17
+    assert flags.version == 0x11
 
 
 def test_status_byte_flags_0x47():
-    """0x47 = online + alarmDev + version 17 (transient wall-switch value)."""
+    """0x47 = online + alarmDev + version 17."""
     flags = StatusByteFlags.from_byte(0x47)
     assert flags.online is True
     assert flags.alarm_dev is True
@@ -68,14 +65,14 @@ def test_status_byte_flags_extremes():
     assert StatusByteFlags.from_byte(0xFF) == StatusByteFlags(True, True, 0x3F)
 
 
-def test_parse_real_wall_switch_blob():
-    """The canonical fixture must round-trip cleanly."""
-    result = parse_pixie_advert({0x0211: REAL_WALL_SWITCH_BLOB})
+def test_parse_wall_switch_blob():
+    """Round-trip the wall-switch fixture."""
+    result = parse_pixie_advert({0x0211: WALL_SWITCH_BLOB})
 
     assert result is not None
     assert isinstance(result, PixieAdvert)
-    assert result.type == 0x16  # 22
-    assert result.stype == 0x0c  # 12
+    assert result.type == 0x16
+    assert result.stype == 0x0c
     assert result.status_byte == 0x45
     assert result.status_flags.online is True
     assert result.status_flags.alarm_dev is False
@@ -83,7 +80,7 @@ def test_parse_real_wall_switch_blob():
     assert result.mac == bytes([0, 0, 0x4D, 0x5D, 0x26, 0x7D])
     assert result.mesh_address == 0x7D
     assert result.network_id == bytes.fromhex("1ae71d19")
-    assert result.raw == REAL_WALL_SWITCH_BLOB
+    assert result.raw == WALL_SWITCH_BLOB
 
 
 def test_parse_synthetic_blob_round_trip():

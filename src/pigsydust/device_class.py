@@ -1,24 +1,11 @@
-"""Pixie internal device-class enum (extracted from the Dart SDK).
+"""Pixie internal device-class enum.
 
-These are the ``(type, stype)`` pairs returned by the Pixie SDK's
-``getTypeStype()`` function in ``pixie_sdk.dart``, packed as
-``(type << 8) | stype`` for use as ``IntEnum`` values. Extracted from
-``libapp.so`` (SAL PIXIE Android v2.15.2375) with `blutter
-<https://github.com/worawit/blutter>`_; see
-``scripts/extract_devicetype_table.py`` and
-``scripts/devicetype_table.txt`` for the regeneration workflow when SAL
-ships a new app release.
+``(type << 8) | stype`` values for the Pixie device-class identifiers.
 
-**These values do not appear in the BLE wire data we have observed.**
-The wire-level ``(type, stype)`` reported in advertisements (bytes 6-7)
-and in decrypted ``0xdb`` status responses (offsets 1-2) uses a
-*different* numbering — a wall switch is ``(0x16, 0x0c)`` on the wire
-versus ``(0x2C, 0x16)`` here. The Dart enum is presumably consumed by
-some app-internal code path (cloud sync, UI categorisation, etc.) that
-we have not traced.
-
-The enum is preserved for reference and possible future use; do not
-look it up against advertisement data.
+These do **not** match the wire-level ``(type, stype)`` carried in
+advertisements (bytes 6-7) — see ``docs/PROTOCOL-REFERENCE.md``. Do not
+look this enum up against advertisement data; it is preserved for
+reference only.
 """
 
 from __future__ import annotations
@@ -27,7 +14,7 @@ from enum import IntEnum
 
 
 class DeviceClass(IntEnum):
-    """Pixie internal device class — Dart-side ``getTypeStype()`` values."""
+    """Pixie internal device class. Not the wire encoding — see module docstring."""
 
     BRIDGE = 0x0216
     BRIDGE_G2 = 0x0204
@@ -45,8 +32,8 @@ class DeviceClass(IntEnum):
     FCR = 0x3606
     POL = 0x020E
     SPO2 = 0x0410
-    # SPO3 shares SPO2's encoding (0x0410) in the Dart table; IntEnum
-    # would make it an alias anyway.  Callers see SPO2.name for both.
+    # SPO3 shares SPO2's encoding (0x0410); IntEnum would make it an
+    # alias anyway. Callers see SPO2.name for both.
     DRC = 0x1404
     BSC = 0x1604
     FAN_CT = 0x6C1E
@@ -93,6 +80,5 @@ class DeviceClass(IntEnum):
     SGBX = 0x0468
     SGBX2 = 0x046A
     SGBX0 = 0x6A6A
-    # DELAY (idx 80) returns (19998, 19998) from getTypeStype — a sentinel
-    # that can't be expressed as (type << 8) | stype in 16 bits, so it is
-    # intentionally omitted.
+    # DELAY is a sentinel value (19998, 19998) that can't fit in a 16-bit
+    # (type << 8) | stype encoding, so it is intentionally omitted.
