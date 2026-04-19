@@ -85,30 +85,29 @@ def test_parse_device_status_0xdb_off():
 # --- 0xDC (broadcast status, two devices packed) ---
 
 def test_parse_device_status_broadcast():
-    """Test parsing a real 0xDC payload with two devices."""
-    # Laundry (addr=0x5E) and Verandah (addr=0xFB)
+    """0xDC payload with two devices packed."""
     payload = bytes.fromhex("5ec20080fb6b00800000")
     n = Notification(source=0, opcode=0xDC, vendor=0x0211, payload=payload)
     statuses = parse_device_status_broadcast(n)
 
     assert len(statuses) == 2
-    assert statuses[0].address == 0x5E  # Laundry
-    assert statuses[1].address == 0xFB  # Verandah
+    assert statuses[0].address == 0x5E
+    assert statuses[1].address == 0xFB
 
 
 def test_parse_device_status_broadcast_all_devices():
-    """Verify all 20 devices are extracted from 10 notifications."""
+    """All 20 device addresses are extracted from 10 broadcast notifications."""
     payloads = [
-        "5ec20080fb6b00800000",  # Laundry(94), Verandah(251)
-        "5156008009cc00800000",  # Back door(81), Mud Room(9)
-        "2f8a649030ed00b00000",  # Kitchen(47), Flood Light(48)
-        "90bc00b0e4ed64a00000",  # Dining(144), Store Room(228)
-        "7dd500b0010000800000",  # Lounge(125), Bridge(1)
-        "29000090d00000a00000",  # Toilet Basin(41), Entrance(208)
-        "3a0000807f0000850000",  # Bed Outside(58), Alex down(127)
-        "72000090270000800000",  # Front door(114), Bathroom(39)
-        "66000085b70000800000",  # Alex Loft(102), Toilet(183)
-        "36000080400000950000",  # Bedroom(54), Alex outside(64)
+        "5ec20080fb6b00800000",
+        "5156008009cc00800000",
+        "2f8a649030ed00b00000",
+        "90bc00b0e4ed64a00000",
+        "7dd500b0010000800000",
+        "29000090d00000a00000",
+        "3a0000807f0000850000",
+        "72000090270000800000",
+        "66000085b70000800000",
+        "36000080400000950000",
     ]
     expected_addrs = {
         94, 251, 81, 9, 47, 48, 144, 228, 125, 1,
@@ -125,15 +124,13 @@ def test_parse_device_status_broadcast_all_devices():
 
 
 def test_parse_device_status_broadcast_with_brightness():
-    """Kitchen has brightness=0x64 (100), should be ON."""
-    # Kitchen(47) metric=0x8A brightness=0x64, Flood Light(48) metric=0xED brightness=0x00
+    """Non-zero brightness on slot 0, zero brightness on slot 1."""
     payload = bytes.fromhex("2f8a649030ed00b00000")
     n = Notification(source=0, opcode=0xDC, vendor=0x0211, payload=payload)
     statuses = parse_device_status_broadcast(n)
 
-    kitchen = statuses[0]
-    flood = statuses[1]
-    assert kitchen.address == 0x2F  # 47
-    assert kitchen.is_on is True  # brightness=0x64
-    assert flood.address == 0x30  # 48
-    assert flood.is_on is False  # brightness=0x00
+    first, second = statuses
+    assert first.address == 0x2F
+    assert first.is_on is True  # brightness=0x64
+    assert second.address == 0x30
+    assert second.is_on is False  # brightness=0x00
