@@ -1,7 +1,7 @@
 # SAL Pixie / Telink BLE Mesh Protocol Reference
 
-A complete protocol reference for SAL Pixie BLE mesh wall switches, based on
-reverse-engineering of the PIXIE iOS app and verified against live hardware.
+A complete protocol reference for SAL Pixie BLE mesh wall switches, verified
+against live hardware.
 
 **Audience**: developers and agents building their own software stack to control
 Pixie devices over BLE, fully offline — no cloud, no hub, no app dependency.
