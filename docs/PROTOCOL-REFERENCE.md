@@ -135,8 +135,7 @@ For example, a Gen-2 wall switch advertises `wire[6]=22, wire[7]=12` →
 >
 > Implementations should apply `*2` first; if the lookup misses, fall back
 > to the raw wire bytes as a defensive measure. The same caveat applies to
-> the `ACF_RS8` shortcut above — it is inferred from SDK code, not from a
-> wire capture.
+> the `ACF_RS8` shortcut above — it has not been wire-confirmed.
 
 #### Bytes 11-14 — mesh network ID
 
@@ -172,7 +171,7 @@ The primary mesh service. Four characteristics:
 ### Service 2: Mesh2 Service (UUID `19200d0c-0b0a-0908-0706-050403020100`)
 
 A secondary service with one characteristic at UUID suffix `1921`. Likely
-for a v2 mesh protocol. Not used by current firmware or the Pixie app.
+for a v2 mesh protocol. Not used by current firmware.
 
 ---
 
@@ -182,8 +181,7 @@ for a v2 mesh protocol. Not used by current firmware or the Pixie app.
 
 Two shared values are needed:
 - **Mesh name**: a string, often `"Smart Light"` (the firmware default).
-- **Mesh password**: a numeric string (the `netID` displayed in the app's
-  "Share Home" screen).
+- **Mesh password**: a numeric string — the mesh's `netID`.
 
 Both are zero-padded to 16 bytes for cryptographic operations.
 
@@ -205,8 +203,8 @@ session key, and per-packet AES-CCM.
 
 ### Login Sequence
 
-1. **Client generates `rand_a`** — 8 random bytes. (The Pixie iOS app uses a
-   fixed value; your implementation should use true random bytes.)
+1. **Client generates `rand_a`** — 8 random bytes. Implementations must use
+   true random bytes.
 
 2. **Client computes `enc_req`**:
    ```
@@ -405,8 +403,8 @@ group_addr(2 LE) || 0xe7 || 69 69 || state(1) 00 10 00 00 00 || group_addr(2 LE)
 - The group address appears twice: as `dst` and in the data tail
 - `0x10` between state and group tail is treated as a constant
 
-Both `0xed` and `0xe7` work for group addressing. The app uses `0xe7` for
-group toggles.
+Both `0xed` and `0xe7` work for group addressing. Implementations may
+prefer `0xe7` for group toggles.
 
 ### Status & Polling
 
@@ -553,9 +551,9 @@ address to human-readable name is purely client-local. Different app installs
 on different devices can have completely divergent group names pointing at the
 same underlying group addresses on the hardware.
 
-"Creating" a group in the app picks the next free group address, names it
-locally, and writes membership to chosen devices via `0xef`. The app uses
-`0xdd` probes to find an unused group address before creating.
+To create a group, a client picks the next free group address, names it
+locally, and writes membership to chosen devices via `0xef`. Use `0xdd`
+probes to find an unused group address before creating.
 
 ### LED Indicator Control
 
@@ -744,7 +742,6 @@ increasing) rather than overwriting in-place.
 ### Sunrise / Sunset (0xd0)
 
 A 3-fragment opcode for pushing compressed sunrise/sunset schedule data.
-The frame layout is documented from firmware analysis:
 
 **Per fragment** (3 frames, each 15-byte plaintext):
 ```
@@ -762,7 +759,7 @@ The 16-byte alarm record carried by `0xcc` write and `0xc2` query responses:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | 1 | `id` (`no`) | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. (Field name in `alarm2json` output is `no`.) |
+| 0 | 1 | `id` | Alarm identifier. `0xc9` conventionally for countdowns; otherwise a monotonic counter. Must be consistent across enable/disable toggles. |
 | 1 | 1 | `repeat` | Weekday bitmask (UTC-rotated). `bit0`=Mon, `bit1`=Tue, ... `bit6`=Sun. `0x7f`=daily, `0x1f`=Mon-Fri, `0x00`=one-shot. See [Timezone & Weekday Rotation](#timezone--weekday-rotation). |
 | 2 | 1 | `hour` | Fire hour in **UTC** (0-23). |
 | 3 | 1 | `min` | Fire minute in **UTC** (0-59). |
