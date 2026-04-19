@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="splash.png" alt="PiggsyDust" width="400">
-</p>
+# Pygsydust
 
 A Python library for controlling [SAL Pixie](https://pixieplus.com.au/) / Telink BLE mesh wall switches - fully offline, no cloud, no hub, no app dependency.
 
