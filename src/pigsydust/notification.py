@@ -5,30 +5,23 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
+from .advert import StatusByteFlags
 from .const import OP_STATUS_BROADCAST_RESP, OP_STATUS_POLL_RESP
 from .crypto import decrypt, notification_nonce
-from .device_class import DeviceClass
 
 
 @dataclass
 class DeviceStatus:
-    """Decoded status of a mesh device.
-
-    ``minor_type``, ``device_class``, and ``raw_manufacturer_data`` come
-    from the scan advertisement, not the status notification.  The
-    notification path leaves them ``None``; downstream code that also
-    sees adverts (e.g. a Home Assistant coordinator) is responsible for
-    correlating and populating them.
-    """
+    """Decoded status of a mesh device."""
 
     address: int
     is_on: bool
-    major_type: int
     mac: bytes
     routing_metric: int = 0
-    minor_type: int | None = None
-    device_class: DeviceClass | None = None
-    raw_manufacturer_data: bytes | None = None
+    type: int | None = None
+    stype: int | None = None
+    status_byte: int | None = None
+    status_flags: StatusByteFlags | None = None
 
 
 @dataclass
@@ -80,8 +73,12 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     0xDB is a unicast status poll response with ``src_addr`` set in the
     wire header.  Payload format (10 bytes after opcode+vendor)::
 
-        padding(1) || product_rev(1) || product_class(1) || major_type(1) ||
+        padding(1) || type(1) || stype(1) || status_byte(1) ||
         mac[5:4:3:2](4) || routing_metric(1) || on_off(1)
+
+    ``type`` and ``stype`` are the wire-halved device-class identifiers
+    (same encoding as advert bytes 6-7). ``status_byte`` is the packed
+    status byte (same layout as advert byte 8).
     """
     if n.opcode != OP_STATUS_POLL_RESP:
         raise ValueError(f"expected opcode 0xDB, got 0x{n.opcode:02X}")
@@ -94,12 +91,16 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     mac[3] = n.payload[6]
     mac[2] = n.payload[7]
 
+    status_byte = n.payload[3]
     return DeviceStatus(
         address=n.source,
         is_on=n.payload[9] != 0,
-        major_type=n.payload[3],
-        routing_metric=n.payload[8],
         mac=bytes(mac),
+        routing_metric=n.payload[8],
+        type=n.payload[1],
+        stype=n.payload[2],
+        status_byte=status_byte,
+        status_flags=StatusByteFlags.from_byte(status_byte),
     )
 
 
@@ -136,9 +137,10 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
         results.append(DeviceStatus(
             address=addr,
             is_on=brightness != 0,
-            major_type=flags,
             mac=bytes(6),  # not available in 0xDC format
             routing_metric=metric,
+            status_byte=flags,
+            status_flags=StatusByteFlags.from_byte(flags),
         ))
 
     return results
