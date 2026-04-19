@@ -1,0 +1,117 @@
+# SAL Pixie DeviceType lookup table — CORRECTED
+# Extracted from libapp.so v2.15.2375 (Dart 3.3.3)
+# Source function: pixie_sdk._dtyps()  @ 0x77ba3c
+#
+# Replaces devicetype_table.txt, which was extracted from getTypeStype()
+# (the encoder) using a script that read enum NAMES from a different enum
+# class — names like "desktop", "laptop", "SPO2" do not exist in the real
+# DeviceType enum. Confirmed against runtime by attaching `log stream` to
+# /Applications/PIXIE.app while interacting with a SWITCH_G2 device:
+#
+#   recv pkt[b] [..., 0, 22, 12, 69, 94, 16, 37, 77, 4, 0]
+#   noti_state: {rsv: 0, product: 22, type: 12, ...}
+#   BT: {... type: 22, stype: 12, ...}
+#   DeviceType.SWITCH_G2(94) Kitchen
+#
+# Wire encoding (in fun=0x1b LightInfoReq response, vendor 0x0211):
+#   byte[12] = product = type / 2
+#   byte[13] = type    = stype / 2     (Dart calls these BT.type / BT.stype)
+#   byte[14] = packed (used | alarmDev | version)
+#   byte[15..18] = mac_id LE
+#
+# Lookup-map encoding (Dart-internal, not seen on the wire):
+#   key = type * 1000 + stype
+#   ALL valid (type, stype) pairs are even — wire halves them losslessly.
+#
+# To identify a device from a 0x1b response payload:
+#   key = (payload[12] * 2) * 1000 + (payload[13] * 2)
+#   DeviceType = lookup[key]
+#
+# Eliciting a 0x1b response: send op=0x1a, vendor=0x0211 (st_pkt_LightInfoReq_t)
+#   payload: notify_req={relay_times: 16, notify_type: 0}
+
+#    key  type  stype  wire_b12  wire_b13  enum
+# -----  ----  -----  --------  --------  ----
+    106     0    106         0        53  SGBX0
+    114     0    114         0        57  ACF_RS8
+   2004     2      4         1         2  BRIDGE_G2
+   2014     2     14         1         7  POL
+   2022     2     22         1        11  BRIDGE
+   2028     2     28         1        14  SGB
+   2102     2    102         1        51  ACF_DUCTED
+   2114     2    114         1        57  ACF_RS8
+   4016     4     16         2         8  SPO3
+   4102     4    102         2        51  ACF_VRV
+   4104     4    104         2        52  SGBX
+   4106     4    106         2        53  SGBX2
+  10030    10     30         5        15  VFAN_ONLY
+  12030    12     30         6        15  FAN_ONLY
+  14096    14     96         7        48  BFAN_ONLY
+  16108    16    108         8        54  ZCL
+  18030    18     30         9        15  FAN_ONLY9
+  20004    20      4        10         2  DRC
+  22004    22      4        11         2  BSC
+  24002    24      2        12         1  GDC1
+  24004    24      4        12         2  GDC1_SW
+  24006    24      6        12         3  GDC1_SL
+  24016    24     16        12         8  GDC1_W
+  24034    24     34        12        17  GDC2
+  26002    26      2        13         1  GDC1_M2
+  26004    26      4        13         2  GDC1_M2W
+  26006    26      6        13         3  GDC1_M2L
+  34048    34     48        17        24  DV02
+  40026    40     26        20        13  RFD
+  40104    40    104        20        52  RFD2_SCAN
+  42024    42     24        21        12  TSWITCH
+  42026    42     26        21        13  TSWITCHG2
+  42096    42     96        21        48  ECL_AC
+  44002    44      2        22         1  SWITCH
+  44022    44     22        22        11  SWITCH
+  44024    44     24        22        12  SWITCH_G2
+  44026    44     26        22        13  SWITCH_G3
+  46022    46     22        23        11  DIMMER
+  46024    46     24        23        12  DIMMER_G2
+  46026    46     26        23        13  DIMMER_G3
+  48004    48      4        24         2  STRIP_W
+  48006    48      6        24         3  FCS
+  48064    48     64        24        32  SFI_8266
+  48066    48     66        24        33  SFI_825X
+  48096    48     96        24        48  DM10
+  48098    48     98        24        49  DALI_DT6
+  48100    48    100        24        50  RCT_W
+  48104    48    104        24        52  RFD2
+  50008    50      8        25         4  STRIP2_CCT
+  50026    50     26        25        13  RFD_CT
+  50100    50    100        25        50  RCT_CCT
+  50104    50    104        25        52  RFD2_CT
+  52008    52      8        26         4  STRIP2_RGBCCT
+  52100    52    100        26        50  RCT_RGBW
+  54004    54      4        27         2  STRIP_RGB
+  54006    54      6        27         3  FCR
+  54008    54      8        27         4  STRIP2_RGB
+  54100    54    100        27        50  RCT_RGB
+  54198    54    198        27        99  RGB_X
+  56100    56    100        28        50  RCT_RGBCCT
+  60002    60      2        30         1  IR36
+  60004    60      4        30         2  IR12
+  60006    60      6        30         3  SMR
+  60020    60     20        30        10  DRS
+  60022    60     22        30        11  DRSM2
+  60024    60     24        30        12  DRSM3
+ 100114   100    114        50        57  ACF_RS8
+ 102002   102      2        51         1  CAP
+ 102004   102      4        51         2  MTW
+ 102006   102      6        51         3  STC
+ 102008   102      8        51         4  MTW2_AL
+ 102010   102     10        51         5  MTW2_AN
+ 102012   102     12        51         6  MRC
+ 102014   102     14        51         7  CAP3
+ 102016   102     16        51         8  SGB3
+ 102020   102     20        51        10  SIC
+ 102040   102     40        51        20  DIAL
+ 106030   106     30        53        15  VFAN_CT
+ 108030   108     30        54        15  FAN_CT
+ 114030   114     30        57        15  FAN_CT9
+ 180002   180      2        90         1  SONOS
+ 320114   320    114       160        57  ACF_RS8
+20017998 20017    998   sentinel  sentinel  DELAY
