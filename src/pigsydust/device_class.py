@@ -1,17 +1,24 @@
-"""Pixie device-class enum (``minjorType`` in the SAL Pixie app's terms).
+"""Pixie internal device-class enum (extracted from the Dart SDK).
 
-The 16-bit big-endian value at bytes ``[15..16]`` of the manufacturer-data
-blob identifies the hardware class — wall switch vs dimmer vs RGB strip
-etc.  The mapping below was extracted from ``libapp.so`` (SAL PIXIE
-Android v2.15.2375) with `blutter
+These are the ``(type, stype)`` pairs returned by the Pixie SDK's
+``getTypeStype()`` function in ``pixie_sdk.dart``, packed as
+``(type << 8) | stype`` for use as ``IntEnum`` values. Extracted from
+``libapp.so`` (SAL PIXIE Android v2.15.2375) with `blutter
 <https://github.com/worawit/blutter>`_; see
 ``scripts/extract_devicetype_table.py`` and
 ``scripts/devicetype_table.txt`` for the regeneration workflow when SAL
 ships a new app release.
 
-Identifiers here are the canonical, presentation-neutral protocol keys.
-Human-readable names are the consumer's concern — e.g. the Home Assistant
-integration maps them to localised strings via its translation files.
+**These values do not appear in the BLE wire data we have observed.**
+The wire-level ``(type, stype)`` reported in advertisements (bytes 6-7)
+and in decrypted ``0xdb`` status responses (offsets 1-2) uses a
+*different* numbering — a wall switch is ``(0x16, 0x0c)`` on the wire
+versus ``(0x2C, 0x16)`` here. The Dart enum is presumably consumed by
+some app-internal code path (cloud sync, UI categorisation, etc.) that
+we have not traced.
+
+The enum is preserved for reference and possible future use; do not
+look it up against advertisement data.
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ from enum import IntEnum
 
 
 class DeviceClass(IntEnum):
-    """Pixie device class, keyed on the 16-bit BE int at advert bytes [15..16]."""
+    """Pixie internal device class — Dart-side ``getTypeStype()`` values."""
 
     BRIDGE = 0x0216
     BRIDGE_G2 = 0x0204
@@ -88,19 +95,4 @@ class DeviceClass(IntEnum):
     SGBX0 = 0x6A6A
     # DELAY (idx 80) returns (19998, 19998) from getTypeStype — a sentinel
     # that can't be expressed as (type << 8) | stype in 16 bits, so it is
-    # intentionally omitted.  It cannot appear in a 16-bit advert field.
-
-    @classmethod
-    def from_minor_type(cls, value: int | None) -> DeviceClass | None:
-        """Look up the device class for a 16-bit ``minor_type`` value.
-
-        Returns ``None`` if ``value`` is ``None`` or not a known class.
-        Unknown values are common — SAL periodically ships new hardware
-        and the enum needs to be regenerated from a fresh app release.
-        """
-        if value is None:
-            return None
-        try:
-            return cls(value)
-        except ValueError:
-            return None
+    # intentionally omitted.
