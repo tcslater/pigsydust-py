@@ -122,7 +122,7 @@ The full table of `(type, stype) → device class` mappings is enumerated in
 For example, a Gen-2 wall switch advertises `wire[6]=22, wire[7]=12` →
 `(type=44, stype=24)` → key `44024` → `SWITCH_G2`.
 
-> **Verification status — IMPORTANT**: the `*2` halving rule has been
+> **Important**: the `*2` halving rule has been
 > directly verified against **`SWITCH_G2` only** (wire `(22, 12)` ↔
 > identifier `(44, 24)`). It has **not** been confirmed for any other
 > device class. The fact that all identifiers in the
@@ -576,7 +576,7 @@ dst(2 LE) || 0xff || 69 69 || b_ch(1) b_lvl(1) o_ch(1) o_lvl(1) || 0x00 * pad
 | 2 | `o_ch` | `0xff` = orange channel select, `0x00` = don't touch orange |
 | 3 | `o_lvl` | Lower nibble = brightness 0-15. Upper nibble is ignored |
 
-> **Critical rule**: each packet must update **exactly one channel**.
+> **Critical**: each packet must update **exactly one channel**.
 > The untouched channel's bytes must be zeroed.
 >
 > - Blue ON:   `a0 12 00 00`
