@@ -90,7 +90,8 @@ async def main(config_path: str) -> None:
         state = "ON" if ds.is_on else "OFF"
         mac = ":".join(f"{b:02X}" for b in ds.mac)
         label = device_label(addr, device_map)
-        print(f"      {label}  major=0x{ds.major_type:02X}  {state}  (reported MAC={mac})")
+        status_byte = ds.status_byte if ds.status_byte is not None else 0
+        print(f"      {label}  status=0x{status_byte:02X}  {state}  (reported MAC={mac})")
 
     # Show which living-building devices didn't respond.
     responded = set(status.keys())

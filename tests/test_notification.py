@@ -49,9 +49,9 @@ def test_parse_notification_wire_wrong_length():
 def test_parse_device_status_0xdb():
     payload = bytearray(10)
     payload[0] = 0x00  # padding
-    payload[1] = 0x16  # product_rev
-    payload[2] = 0x0C  # product_class
-    payload[3] = 0x47  # major_type
+    payload[1] = 0x16  # type (wire-halved)
+    payload[2] = 0x0C  # stype (wire-halved)
+    payload[3] = 0x47  # status_byte — online + alarmDev + version 0x11
     payload[4] = 0xFF  # mac[5]
     payload[5] = 0xEE  # mac[4]
     payload[6] = 0xDD  # mac[3]
@@ -64,14 +64,22 @@ def test_parse_device_status_0xdb():
 
     assert ds.address == 0x007D
     assert ds.is_on is True
-    assert ds.major_type == 0x47
+    assert ds.type == 0x16
+    assert ds.stype == 0x0C
+    assert ds.status_byte == 0x47
+    assert ds.status_flags is not None
+    assert ds.status_flags.online is True
+    assert ds.status_flags.alarm_dev is True
+    assert ds.status_flags.version == 0x11
     assert ds.mac[5] == 0xFF
     assert ds.mac[4] == 0xEE
 
 
 def test_parse_device_status_0xdb_off():
     payload = bytearray(10)
-    payload[3] = 0x45  # major_type (opaque; observed across hardware)
+    payload[1] = 0x16  # type
+    payload[2] = 0x0C  # stype
+    payload[3] = 0x45  # status_byte — online, no alarmDev, version 0x11
     payload[9] = 0x00  # OFF
 
     n = Notification(source=0x0002, opcode=0xDB, vendor=0x0211, payload=bytes(payload))
@@ -79,7 +87,10 @@ def test_parse_device_status_0xdb_off():
 
     assert ds.address == 0x0002
     assert ds.is_on is False
-    assert ds.major_type == 0x45
+    assert ds.status_byte == 0x45
+    assert ds.status_flags is not None
+    assert ds.status_flags.alarm_dev is False
+    assert ds.status_flags.online is True
 
 
 # --- 0xDC (broadcast status, two devices packed) ---
