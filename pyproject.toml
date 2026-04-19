@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "pigsydust"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Python library for controlling SAL Pixie BLE mesh wall switches"
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,12 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
 ]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/pigsydust/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pigsydust"]
