@@ -163,10 +163,41 @@ The primary mesh service. Four characteristics:
 
 | UUID Suffix | Name | Purpose |
 |-------------|------|---------|
-| `1911` | CHAR_NOTIFY | Subscribe (`0x01`), then receive encrypted notifications |
+| `1911` | CHAR_NOTIFY | Non-standard notify — see below. Write `0x01` to arm, then receive encrypted notification PDUs |
 | `1912` | CHAR_CMD | Write encrypted command packets |
 | `1913` | CHAR_OTA | OTA / config (not used in normal operation) |
 | `1914` | CHAR_PAIR | Login: write `0x0c` request, read `0x0d` response |
+
+#### CHAR_NOTIFY subscription (non-standard)
+
+CHAR_NOTIFY does not participate in the standard GATT notification
+mechanism, and the usual "subscribe" calls on the host BLE stack
+(`setNotifyValue:YES`, `StartNotify`, `AcquireNotify`) are not
+sufficient on their own:
+
+- On iOS firmware the characteristic has **no CCCD descriptor**
+  (`0x2902`) — only a User Description (`0x2901`). CoreBluetooth's
+  `setNotifyValue:YES` therefore has no CCCD to write and silently
+  succeeds without arming the firmware's notify pump.
+- On Linux firmware the CCCD descriptor is exposed but the firmware
+  never responds to writes against it, so BlueZ's `StartNotify` /
+  `AcquireNotify` hang on the CCCD write and eventually drop the
+  connection.
+
+To actually start receiving notifications the client must **write the
+single byte `0x01` to the characteristic value** using an ATT Write
+**Request** (with response). Write Without Response is silently dropped
+by the firmware and has no effect. Notification frames are then
+delivered as ordinary `ATT_HANDLE_VALUE_NTF` PDUs on the value handle.
+
+The host BLE stack's subscribe call still has value when it succeeds:
+it wires up the stack's internal value-update dispatch so that incoming
+PDUs are delivered to the client callback. The recommended pattern on
+platforms where it is available (CoreBluetooth, some BlueZ versions) is
+to call the subscribe API for delivery wiring, then issue the `0x01`
+Write Request to arm the firmware. On platforms where the subscribe
+call hangs (BlueZ on current firmware), skip it entirely and read PDUs
+directly from a lower layer — see [Platform Notes](#platform-notes).
 
 ### Service 2: Mesh2 Service (UUID `19200d0c-0b0a-0908-0706-050403020100`)
 
@@ -1016,7 +1047,8 @@ connection will time out and drop.
 ### Post-Login Initialisation
 
 Immediately after login, the client should:
-1. Subscribe to CHAR_NOTIFY (`0x1911`) by writing `0x01`
+1. Enable CHAR_NOTIFY (`0x1911`) — see
+   [CHAR_NOTIFY subscription (non-standard)](#char_notify-subscription-non-standard)
 2. Send `0xc5` SetUTC time sync broadcast
 3. Optionally send `0xda` status polls to populate device state
 
@@ -1040,9 +1072,35 @@ On connection drop:
 - CHAR_PAIR login write must use ATT Write Request (with response), not
   Write Without Response
 - CoreBluetooth UUIDs are used instead of MAC addresses for device identity
+- CHAR_NOTIFY subscription: call `setNotifyValue:YES` first so
+  CoreBluetooth wires up its value-update delegate, then issue an ATT
+  **Write Request** of `0x01` to the characteristic value. Write Without
+  Response is silently dropped by CoreBluetooth for this characteristic
+  and the firmware never starts emitting notifications. The
+  `setNotifyValue:YES` call itself always succeeds (there is no CCCD for
+  it to write) — it cannot be relied on as a signal that subscription
+  worked.
+- Second `DiscoverServices` / `DiscoverCharacteristics` passes on the
+  same connection can invalidate the delegate-side bookkeeping that
+  associates previously discovered characteristics with their write
+  callbacks, causing subsequent writes to time out. Discover all
+  services and characteristics the client needs (mesh service plus DIS)
+  in a single pair of discovery calls before issuing any login or
+  command writes.
 
 ### Linux (BlueZ)
 
 - Real MAC addresses are available directly from the BLE scan
 - CHAR_PAIR login can use Write Without Response (BlueZ maps correctly)
 - No additional MAC extraction needed
+- CHAR_NOTIFY subscription: do **not** call `StartNotify` /
+  `AcquireNotify`. The firmware exposes a CCCD descriptor but never
+  responds to writes against it, so the BlueZ subscribe call hangs on
+  the ATT write and — when cancelled — can leave the D-Bus session in a
+  bad state that requires reconnection. Instead, issue an ATT Write
+  Request of `0x01` to the characteristic value to arm the firmware,
+  then read `ATT_HANDLE_VALUE_NTF` PDUs directly from a raw HCI socket
+  filtered on the characteristic's value handle. This bypasses BlueZ's
+  notification layer entirely and requires `CAP_NET_RAW` +
+  `CAP_NET_ADMIN` on the process (e.g. a privileged container or
+  matching capability bounding set).
