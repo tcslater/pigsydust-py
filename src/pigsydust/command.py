@@ -52,6 +52,16 @@ def query_status() -> bytes:
     )
 
 
+def status_poll(dst: int) -> bytes:
+    """Build a unicast status poll (opcode 0xDA, 7-byte plaintext).
+
+    Vendor is :data:`VENDOR_SKYTONE_ALT` (0x0211), not the usual
+    :data:`VENDOR_SKYTONE`. The target responds with a 0xDB unicast
+    status notification carrying its MAC, device class, and on/off state.
+    """
+    return _encode(dst, OP_STATUS_POLL, VENDOR_SKYTONE_ALT, b"\x10\x00", 7)
+
+
 def set_utc(now: float | None = None) -> bytes:
     """Build a time sync broadcast (opcode 0xC5, 15-byte plaintext).
 
