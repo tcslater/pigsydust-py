@@ -5,3 +5,4 @@ dist/
 build/
 .pytest_cache/
 src/pigsydust/_version.py
+uv.lock
