@@ -2,13 +2,15 @@
 
 import struct
 
-from pigsydust.command import query_status, set_utc, turn_off, turn_on
+from pigsydust.command import query_status, set_utc, status_poll, turn_off, turn_on
 from pigsydust.const import (
     ADDR_BROADCAST,
     OP_ON_OFF,
+    OP_STATUS_POLL,
     OP_STATUS_QUERY,
     OP_TYPE_CLIENT,
     VENDOR_SKYTONE,
+    VENDOR_SKYTONE_ALT,
 )
 
 
@@ -47,6 +49,17 @@ def test_query_status():
     dst = struct.unpack_from("<H", buf, 0)[0]
     assert dst == ADDR_BROADCAST
     assert buf[2] == _wire_opcode(OP_STATUS_QUERY)
+
+
+def test_status_poll():
+    buf = status_poll(0x00E4)
+    assert len(buf) == 7
+    dst = struct.unpack_from("<H", buf, 0)[0]
+    assert dst == 0x00E4
+    assert buf[2] == _wire_opcode(OP_STATUS_POLL)
+    vendor = struct.unpack_from("<H", buf, 3)[0]
+    assert vendor == VENDOR_SKYTONE_ALT
+    assert buf[5:7] == b"\x10\x00"
 
 
 def test_set_utc():

@@ -352,6 +352,39 @@ class PixieClient:
         await self._send_with_retry(command.led_set_orange(address, 0))
         await asyncio.sleep(0.1)
 
+    async def ping_device(
+        self, address: int, timeout: float = 2.0
+    ) -> DeviceStatus | None:
+        """Unicast-poll *address* and await its 0xDB reply.
+
+        Returns the :class:`DeviceStatus` on reply, or ``None`` on timeout
+        (device offline or unreachable). Filters to unicast 0xDB responses
+        only — a broadcast 0xDC status (mac all-zero) does not count, so
+        stale post-``query_status`` traffic won't mask a dead device.
+        """
+        result: DeviceStatus | None = None
+        event = asyncio.Event()
+
+        def collector(ds: DeviceStatus) -> None:
+            nonlocal result
+            if ds.address == address and ds.mac != bytes(6):
+                result = ds
+                event.set()
+
+        self._status_callbacks.append(collector)
+        try:
+            await self._send_with_retry(command.status_poll(address))
+            try:
+                await asyncio.wait_for(event.wait(), timeout)
+            except asyncio.TimeoutError:
+                pass
+        finally:
+            try:
+                self._status_callbacks.remove(collector)
+            except ValueError:
+                pass
+        return result
+
     async def query_status(self) -> dict[int, DeviceStatus]:
         results: dict[int, DeviceStatus] = {}
         event = asyncio.Event()
