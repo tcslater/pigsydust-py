@@ -1,11 +1,14 @@
-"""Pixie internal device-class enum.
+"""Pixie device-class lookup.
 
-``(type << 8) | stype`` values for the Pixie device-class identifiers.
+Resolves wire ``(type, stype)`` advert bytes (offsets 6-7) — and the same
+fields in a decrypted ``0xDB`` status response — to a device-class
+identifier per ``docs/PROTOCOL-REFERENCE.md``.
 
-These do **not** match the wire-level ``(type, stype)`` carried in
-advertisements (bytes 6-7) — see ``docs/PROTOCOL-REFERENCE.md``. Do not
-look this enum up against advertisement data; it is preserved for
-reference only.
+Wire bytes are **halved** against the canonical identifier:
+
+    canonical_type  = wire_type * 2
+    canonical_stype = wire_stype * 2
+    key             = canonical_type * 1000 + canonical_stype
 """
 
 from __future__ import annotations
@@ -14,71 +17,127 @@ from enum import IntEnum
 
 
 class DeviceClass(IntEnum):
-    """Pixie internal device class. Not the wire encoding — see module docstring."""
+    """Canonical Pixie device class, keyed by ``type * 1000 + stype``.
 
-    BRIDGE = 0x0216
-    BRIDGE_G2 = 0x0204
-    SWITCH = 0x2C16
-    DESKTOP = 0x2C18
-    LAPTOP = 0x2C1A
-    TSWITCH = 0x2A18
-    DIMMER = 0x2E16
-    DIMMER_G2 = 0x2E18
-    DIMMER_G3 = 0x2E1A
-    RFD = 0x281A
-    STRIP_W = 0x3004
-    FCS = 0x3006
-    STRIP_RGB = 0x3604
-    FCR = 0x3606
-    POL = 0x020E
-    SPO2 = 0x0410
-    # SPO3 shares SPO2's encoding (0x0410); IntEnum would make it an
-    # alias anyway. Callers see SPO2.name for both.
-    DRC = 0x1404
-    BSC = 0x1604
-    FAN_CT = 0x6C1E
-    FAN_ONLY = 0x0C1E
-    FAN_CT9 = 0x721E
-    FAN_ONLY9 = 0x121E
-    VFAN_CT = 0x6A1E
-    VFAN_ONLY = 0x0A1E
-    BFAN_ONLY = 0x0E60
-    STRIP2_RGBCCT = 0x3408
-    STRIP2_RGB = 0x3608
-    STRIP2_CCT = 0x3208
-    RGB_X = 0x36C6
-    IR36 = 0x3C02
-    IR12 = 0x3C04
-    SMR = 0x3C06
-    TSWITCHG2 = 0x2A1A
-    RFD_CT = 0x321A
-    DRS = 0x3C14
-    DRSM2 = 0x3C16
-    DRSM3 = 0x3C18
-    DM10 = 0x3060
-    DALI_DT6 = 0x3062
-    GDC1 = 0x1802
-    GDC1_SW = 0x1804
-    GDC1_SL = 0x1806
-    GDC1_W = 0x1810
-    GDC2 = 0x1822
-    GDC1_M2 = 0x1A02
-    GDC1_M2W = 0x1A04
-    GDC1_M2L = 0x1A06
-    RFD2 = 0x3068
-    RFD2_CT = 0x3268
-    RCT_W = 0x3064
-    RCT_CCT = 0x3264
-    RCT_RGB = 0x3664
-    RCT_RGBW = 0x3464
-    RCT_RGBCCT = 0x3864
-    ZCL = 0x106C
-    ACF_VRV = 0x0466
-    ACF_DUCTED = 0x0266
-    SGB = 0x021C
-    SGB3 = 0x6610
-    SGBX = 0x0468
-    SGBX2 = 0x046A
-    SGBX0 = 0x6A6A
-    # DELAY is a sentinel value (19998, 19998) that can't fit in a 16-bit
-    # (type << 8) | stype encoding, so it is intentionally omitted.
+    Values are the post-halving spec lookup keys. Use
+    :func:`device_class_lookup` / :func:`device_class_name` to resolve
+    raw wire bytes.
+    """
+
+    SGBX0 = 106
+    BRIDGE_G2 = 2004
+    POL = 2014
+    BRIDGE = 2022
+    SGB = 2028
+    ACF_DUCTED = 2102
+    SPO3 = 4016
+    ACF_VRV = 4102
+    SGBX = 4104
+    SGBX2 = 4106
+    VFAN_ONLY = 10030
+    FAN_ONLY = 12030
+    BFAN_ONLY = 14096
+    ZCL = 16108
+    FAN_ONLY9 = 18030
+    DRC = 20004
+    BSC = 22004
+    GDC1 = 24002
+    GDC1_SW = 24004
+    GDC1_SL = 24006
+    GDC1_W = 24016
+    GDC2 = 24034
+    GDC1_M2 = 26002
+    GDC1_M2W = 26004
+    GDC1_M2L = 26006
+    DV02 = 34048
+    RFD = 40026
+    RFD2_SCAN = 40104
+    TSWITCH = 42024
+    TSWITCHG2 = 42026
+    ECL_AC = 42096
+    SWITCH = 44002
+    SWITCH_G2 = 44024
+    SWITCH_G3 = 44026
+    DIMMER = 46022
+    DIMMER_G2 = 46024
+    DIMMER_G3 = 46026
+    STRIP_W = 48004
+    FCS = 48006
+    SFI_8266 = 48064
+    SFI_825X = 48066
+    DM10 = 48096
+    DALI_DT6 = 48098
+    RCT_W = 48100
+    RFD2 = 48104
+    STRIP2_CCT = 50008
+    RFD_CT = 50026
+    RCT_CCT = 50100
+    RFD2_CT = 50104
+    STRIP2_RGBCCT = 52008
+    RCT_RGBW = 52100
+    STRIP_RGB = 54004
+    FCR = 54006
+    STRIP2_RGB = 54008
+    RCT_RGB = 54100
+    RGB_X = 54198
+    RCT_RGBCCT = 56100
+    IR36 = 60002
+    IR12 = 60004
+    SMR = 60006
+    DRS = 60020
+    DRSM2 = 60022
+    DRSM3 = 60024
+    CAP = 102002
+    MTW = 102004
+    STC = 102006
+    MTW2_AL = 102008
+    MTW2_AN = 102010
+    MRC = 102012
+    CAP3 = 102014
+    SGB3 = 102016
+    SIC = 102020
+    DIAL = 102040
+    VFAN_CT = 106030
+    FAN_CT = 108030
+    FAN_CT9 = 114030
+    SONOS = 180002
+    # ACF_RS8 matches wire ``stype == 0x39`` (canonical stype 114) for any
+    # type. Represented here with a synthetic key outside the normal
+    # ``type*1000 + stype`` space so direct lookups don't collide.
+    ACF_RS8 = 10000114
+
+
+# Wire-identifier aliases that share a canonical name. The spec lists
+# both (44, 2) and (44, 22) as ``SWITCH``; keep the enum member unique
+# and route the aliased key through a separate table.
+_ALIASES: dict[int, DeviceClass] = {
+    44022: DeviceClass.SWITCH,
+}
+
+
+def device_class_lookup(wire_type: int, wire_stype: int) -> DeviceClass | None:
+    """Resolve wire bytes to a :class:`DeviceClass`, or ``None`` if unknown.
+
+    Applies the ``*2`` halving rule, then the ACF_RS8 shortcut for
+    ``wire_stype == 0x39``, and finally falls back to a raw-bytes lookup.
+    """
+    if wire_stype == 0x39:
+        return DeviceClass.ACF_RS8
+    canonical = (wire_type * 2) * 1000 + wire_stype * 2
+    try:
+        return DeviceClass(canonical)
+    except ValueError:
+        pass
+    if canonical in _ALIASES:
+        return _ALIASES[canonical]
+    raw = wire_type * 1000 + wire_stype
+    try:
+        return DeviceClass(raw)
+    except ValueError:
+        return _ALIASES.get(raw)
+
+
+def device_class_name(wire_type: int, wire_stype: int) -> str | None:
+    """Resolve wire bytes to a device-class identifier string, or ``None``."""
+    cls = device_class_lookup(wire_type, wire_stype)
+    return cls.name if cls is not None else None

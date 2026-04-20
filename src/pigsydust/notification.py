@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from .advert import StatusByteFlags
 from .const import OP_STATUS_BROADCAST_RESP, OP_STATUS_POLL_RESP
 from .crypto import decrypt, notification_nonce
+from .device_class import device_class_name
 
 
 @dataclass
@@ -22,6 +23,13 @@ class DeviceStatus:
     stype: int | None = None
     status_byte: int | None = None
     status_flags: StatusByteFlags | None = None
+
+    @property
+    def device_class_name(self) -> str | None:
+        """Device-class identifier from wire ``(type, stype)``, or ``None``."""
+        if self.type is None or self.stype is None:
+            return None
+        return device_class_name(self.type, self.stype)
 
 
 @dataclass
