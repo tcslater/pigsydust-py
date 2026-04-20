@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .const import MANUFACTURER_ID
+from .device_class import device_class_name
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,11 @@ class PixieAdvert:
     mesh_address: int
     network_id: bytes
     raw: bytes
+
+    @property
+    def device_class_name(self) -> str | None:
+        """Device-class identifier resolved from wire ``(type, stype)``."""
+        return device_class_name(self.type, self.stype)
 
 
 def parse_pixie_advert(
