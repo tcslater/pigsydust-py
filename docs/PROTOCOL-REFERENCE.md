@@ -456,9 +456,6 @@ dst(2 LE) || 0xda || 11 02 || 10 00
 | 11 | `ttc` — time-to-cost relay-quality metric (see encoding below) |
 | 12 | `hops` — relay count from the connected gateway (`0x00` = gateway itself, `0x01` = one relay away, …) |
 
-Lamp on/off state is not carried in this payload; use `0xdc` (brightness
-byte) for state.
-
 **`ttc` byte encoding (byte 11).** The byte is packed:
 
 - Bits 7-6: unit selector — `00` = 1 ms, `01` = 4 ms, `10` = 16 ms, `11` = 256 ms.

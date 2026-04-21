@@ -15,18 +15,11 @@ from .device_class import device_class_name
 class DeviceStatus:
     """Decoded status of a mesh device.
 
-    ``is_on`` is only populated by the 0xDC (broadcast) path, where the
-    brightness byte is non-zero. The 0xDB (unicast poll) response does
-    **not** encode on/off — byte[9] is the mesh ``hops`` count, not a
-    state flag — so the 0xDB parser leaves ``is_on`` as ``None``.
-
-    ``ttc`` is Telink's "time to cost" relay-quality metric (byte[8] of
-    0xDB). ``hops`` is the relay count from gateway (0 = gateway itself,
-    1 = one relay away, …) and is only present for 0xDB.
-
-    ``sno`` is the mesh serial-number byte carried by each 0xDC device
-    slot (byte[1]) — ``0x00`` means the device is currently unreachable
-    / offline. Only populated on the 0xDC path.
+    ``is_on`` is populated by the 0xDC (broadcast) path from the
+    brightness byte. ``ttc`` is the time-to-cost relay metric and
+    ``hops`` is the relay count from gateway (0 = gateway itself);
+    both come from 0xDB. ``sno`` is the mesh serial-number byte from
+    0xDC (``0x00`` means the device is offline).
     """
 
     address: int
@@ -105,10 +98,6 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     status byte (same layout as advert byte 8). ``ttc`` is the
     time-to-cost relay-quality metric; ``hops`` is the relay count
     from the connected gateway (0 = gateway itself).
-
-    Lamp on/off state is not carried in this payload, so ``is_on`` on
-    the returned :class:`DeviceStatus` is ``None``. Use the 0xDC
-    broadcast (brightness byte) for on/off.
     """
     if n.opcode != OP_STATUS_POLL_RESP:
         raise ValueError(f"expected opcode 0xDB, got 0x{n.opcode:02X}")
