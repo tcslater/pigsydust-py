@@ -264,10 +264,9 @@ sno(3) || tag(2) || ciphertext(N)
 
 - **`sno`** (3 bytes): sequence number. Byte 0 is a per-command counter that
   increments by 1 for each command sent. Bytes 1-2 are a per-session salt
-  (random, fixed at login time for the session). Per Telink SDK §6.9 the
-  combined 3-byte `sno` MUST NOT be all-zero — `0x000000` is reserved and
-  the mesh may drop frames that carry it. Clients should seed the counter
-  with `0x01` or higher at login.
+  (random, fixed at login time for the session). The combined 3-byte `sno`
+  MUST NOT be `0x000000` — the all-zero value is reserved and may be
+  dropped by peers. Seed the counter with `0x01` or higher at login.
 - **`tag`** (2 bytes): truncated CBC-MAC authentication tag.
 - **`ciphertext`** (N bytes): encrypted payload. Length depends on the
   command (typically 15 bytes for on/off, 10 bytes for status queries, etc.).
@@ -422,12 +421,11 @@ prefer `0xe7` for group toggles.
 - Bytes `[0-1]` of data are session-variable (firmware is indifferent)
 - Bytes `[2-4]` are the fixed tag `d7 69 00`
 - **10-byte plaintext** (shorter than the standard 15)
-- **SAL/Pixie-specific**: the stock Telink reference client does not use
-  `0xc5` as a status-query opcode — it enables the `0xdc` burst by
-  subscribing to the notify characteristic (handle `0x0012`) and writing
-  `0x01` to it. `0xc5` appears to be a Pixie/SAL addition layered on top.
-  Note this opcode is reused for SetUTC elsewhere in this doc; behaviour
-  depends on destination and payload.
+- **Pixie-specific**: on stock Telink firmware the `0xdc` burst is enabled
+  by subscribing to the notify characteristic (handle `0x0012`) and
+  writing `0x01` to it; `0xc5` as a status-query opcode is layered on
+  top by Pixie/SAL. The same opcode is reused for SetUTC elsewhere in
+  this doc — behaviour depends on destination and payload.
 
 #### 0xda — Status Poll (unicast or broadcast)
 
@@ -455,30 +453,18 @@ dst(2 LE) || 0xda || 11 02 || 10 00
 | 5 | `stype` — wire-level device class sub-identifier (halved) |
 | 6 | Packed status byte — same layout as advert byte 8 (bit 0 = online, bit 1 = alarmDev, bits 2-7 = firmware version). |
 | 7-10 | Source MAC bytes `[5,4,3,2]` |
-| 11 | `ttc` — Telink "time to cost" relay-quality metric |
+| 11 | `ttc` — time-to-cost relay-quality metric (see encoding below) |
 | 12 | `hops` — relay count from the connected gateway (`0x00` = gateway itself, `0x01` = one relay away, …) |
 
-> **Note — on/off is NOT in this payload.** Byte 12 is the mesh `hops`
-> count, **not** an on/off flag, per Telink SDK §6.9 and verified against
-> live hardware. The `0xdb` response does not carry the device's lamp
-> state at all — use the `0xdc` broadcast (brightness byte) for that.
-> Earlier reverse-engineering of this library, and the upstream `pigsydust`
-> Go library, both mislabelled byte 12 as `on_off`; that misread was
-> coincidentally correct for gateways/hop-0 devices in the OFF state but
-> wrong elsewhere.
+Lamp on/off state is not carried in this payload; use `0xdc` (brightness
+byte) for state.
 
-**`ttc` byte encoding (byte 11).** Per Telink SDK §6.9 the byte is
-packed:
+**`ttc` byte encoding (byte 11).** The byte is packed:
 
-- Bits 7-6: unit selector — `00` = 1 ms, `01` = 4 ms, `10` = 16 ms,
-  `11` = 256 ms.
-- Bits 5-0: 6-bit magnitude (0-63) in the selected unit.
+- Bits 7-6: unit selector — `00` = 1 ms, `01` = 4 ms, `10` = 16 ms, `11` = 256 ms.
+- Bits 5-0: magnitude (0-63) in the selected unit.
 
-So a `ttc` of `0x16` (`00 010110`) decodes to 22 ms (unit = 1 ms,
-magnitude = 22); `0x47` (`01 000111`) decodes to 28 ms (unit = 4 ms,
-magnitude = 7). Only the raw byte is currently surfaced on
-`DeviceStatus.ttc`; clients that need the real-time value should
-decode the packed field.
+Examples: `0x16` (`00 010110`) = 22 ms; `0x47` (`01 000111`) = 28 ms.
 
 #### 0xdc — Device Status Notification
 
@@ -504,12 +490,10 @@ in a 4-byte-per-device packed format.
 | 8 | Device B: `sno` |
 | 9 | Device B: brightness |
 | 10 | Device B: customer-reserved |
-
-> **Note — `sno` vs "routing metric".** Earlier revisions of this doc
-> labelled byte 4 as "routing metric". Telink SDK §6.9 defines it as
-> the mesh serial number and reserves `0x00` to signal an offline
-> device; semantically distinct from the `ttc` value in `0xdb`.
 | 11-12 | `0x00 0x00` (padding) |
+
+The `sno` slot is semantically distinct from the `ttc` value in `0xdb`:
+`sno == 0` signals an offline device, not a timing measurement.
 
 **Broadcast burst**: a mesh with N devices produces ceil(N/2)
 notifications, each carrying two device statuses. Triggered by `0xc5`
@@ -794,22 +778,20 @@ dst(2 LE) || 0xe3 || 11 02 || <payload>
 ```
 
 - Removes the target node from the current mesh.
-- Per Telink SDK §6.9, kick-out resets the target's mesh name and
-  password to factory defaults, so the node immediately starts
-  advertising under the provisioning mesh again.
-- The sending client will lose visibility of that node on the current
-  mesh until it is re-added via the normal provisioning flow.
+- Kick-out also resets the target's mesh name and password to factory
+  defaults, so the node immediately starts advertising under the
+  provisioning mesh again.
+- The sending client loses visibility of that node on the current mesh
+  until it is re-provisioned.
 
 ### Factory Reset via Power Sequence
 
-When a node is unreachable (wrong mesh credentials, credentials lost,
-etc.) it can be reset to factory defaults without mesh access by
-cycling the mains supply in a specific short/long pattern. Per Telink
-SDK §6.9 the canonical sequence is **three short cycles followed by
-two long cycles** (e.g. ~1 s off / ~1 s on for the short phase,
-~3 s off / ~3 s on for the long phase — consult vendor docs for the
-exact windows). On completion the node drops back to the Pixie
-provisioning mesh and can be re-paired.
+When a node is unreachable (credentials lost, bricked out of its
+mesh) it can be reset to factory defaults without mesh access by
+cycling mains power in a short/long pattern: **three short cycles
+followed by two long cycles**. Approximate timings: short ≈ 1 s off /
+1 s on, long ≈ 3 s off / 3 s on. On completion the node drops back
+to the provisioning mesh and can be re-paired.
 
 ---
 
@@ -1080,21 +1062,17 @@ Immediately after login, the client should:
 2. Send `0xc5` SetUTC time sync broadcast
 3. Optionally send `0xda` status polls to populate device state
 
-**Online-status priming (recommended).** Telink's reference clients
-trigger the online-status burst **three times at ~500 ms intervals**
-immediately after subscribing, to make sure the initial device list
-populates even if the first burst is racing other mesh traffic. Pixie
-behaves the same way — clients that poll only once may see a missing
-device on cold start.
+**Online-status priming (recommended).** Trigger the online-status
+burst **three times at ~500 ms intervals** immediately after
+subscribing. A single poll can race other mesh traffic and miss
+devices on cold start.
 
 ### Mesh Timing Budget
 
-Telink's mesh relay is designed around a per-hop delay ceiling on the
-order of a few milliseconds, which keeps whole-mesh command
-propagation below ~100 ms even in multi-hop topologies. Practical
-consequence for clients: after a broadcast, wait ≥100 ms before polling
-state, and expect unicast status replies to land within tens of ms per
-hop.
+Per-hop relay delay is on the order of a few milliseconds, so
+whole-mesh command propagation stays below ~100 ms even on multi-hop
+topologies. After a broadcast, wait ≥100 ms before polling state;
+expect unicast status replies within tens of ms per hop.
 
 ### Reconnection
 

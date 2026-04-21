@@ -102,14 +102,13 @@ def parse_device_status(n: Notification) -> DeviceStatus:
 
     ``type`` and ``stype`` are the wire-halved device-class identifiers
     (same encoding as advert bytes 6-7). ``status_byte`` is the packed
-    status byte (same layout as advert byte 8). ``ttc`` is Telink's
-    "time to cost" relay-quality metric; ``hops`` is the relay count
+    status byte (same layout as advert byte 8). ``ttc`` is the
+    time-to-cost relay-quality metric; ``hops`` is the relay count
     from the connected gateway (0 = gateway itself).
 
-    The on/off state is **not** encoded in this payload — the field
-    historically labelled ``on_off`` is in fact ``hops`` per Telink
-    SDK manual §6.9, verified against live hardware. ``is_on`` on the
-    returned :class:`DeviceStatus` is therefore ``None``.
+    Lamp on/off state is not carried in this payload, so ``is_on`` on
+    the returned :class:`DeviceStatus` is ``None``. Use the 0xDC
+    broadcast (brightness byte) for on/off.
     """
     if n.opcode != OP_STATUS_POLL_RESP:
         raise ValueError(f"expected opcode 0xDB, got 0x{n.opcode:02X}")
@@ -148,15 +147,15 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
         dev_b_addr(1) || dev_b_sno(1)  || dev_b_brightness(1) || dev_b_flags(1) ||
         padding(2)
 
-    Per Telink SDK §6.9 the second byte in each slot is ``sno`` — the
-    mesh serial number for the device — and ``sno == 0`` signals that
-    the device is currently offline/unreachable. The fourth byte is
-    labelled "customer reserved" in the Telink reference; Pixie
-    firmware uses it as the same packed status byte as advert byte 8.
+    The second byte in each slot is ``sno`` — the mesh serial number
+    for the device — and ``sno == 0`` signals that the device is
+    currently offline/unreachable. The fourth byte is a
+    customer-reserved slot that Pixie firmware fills with the same
+    packed status byte as advert byte 8.
 
     The on/off state is inferred from the brightness byte (0x00 = off,
-    non-zero = on). That mapping is still tentative for Pixie
-    specifically — it holds in practice but is not quoted from Telink.
+    non-zero = on); this holds in practice for Pixie units but is not
+    independently guaranteed by the wire format.
     """
     if n.opcode != OP_STATUS_BROADCAST_RESP:
         raise ValueError(f"expected opcode 0xDC, got 0x{n.opcode:02X}")
