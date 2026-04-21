@@ -11,6 +11,7 @@ from bleak import BleakClient, BleakScanner
 
 from . import command
 from .const import (
+    ADDR_BROADCAST_POLL,
     CHAR_CMD_UUID,
     CHAR_NOTIFY_UUID,
     CHAR_PAIR_UUID,
@@ -41,6 +42,8 @@ _LOGGER = logging.getLogger(__name__)
 _HEARTBEAT_INTERVAL = 25  # seconds — must be < 30s Telink keepalive
 _STATUS_COLLECT_TIMEOUT = 3  # seconds
 _MAX_RECONNECT_ATTEMPTS = 3
+_BROADCAST_POLL_RETRIES = 3
+_BROADCAST_POLL_INTERVAL = 0.3  # seconds
 
 
 def _extract_mac_from_manufacturer_data(mfr_data: dict[int, bytes]) -> bytes | None:
@@ -386,8 +389,12 @@ class PixieClient:
         return result
 
     async def query_status(self) -> dict[int, DeviceStatus]:
+        # Mirrors the Pixie app's startup sequence: a single 0xC5 broadcast
+        # to elicit 0xDC from responding devices, followed by a handful of
+        # 0x7FFF-addressed 0xDA polls that wake stragglers into emitting
+        # fresh 0xDC. 0xC5 alone leaves dimly-reachable devices out of the
+        # burst; the broadcast polls reliably close the gap.
         results: dict[int, DeviceStatus] = {}
-        event = asyncio.Event()
 
         def collector(ds: DeviceStatus) -> None:
             results[ds.address] = ds
@@ -395,10 +402,12 @@ class PixieClient:
         self._status_callbacks.append(collector)
         try:
             await self._send_with_retry(command.query_status())
-            try:
-                await asyncio.wait_for(event.wait(), _STATUS_COLLECT_TIMEOUT)
-            except asyncio.TimeoutError:
-                pass
+            for _ in range(_BROADCAST_POLL_RETRIES):
+                await asyncio.sleep(_BROADCAST_POLL_INTERVAL)
+                await self._send_with_retry(
+                    command.status_poll(ADDR_BROADCAST_POLL)
+                )
+            await asyncio.sleep(_STATUS_COLLECT_TIMEOUT)
         finally:
             self._status_callbacks.remove(collector)
 
