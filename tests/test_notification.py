@@ -56,14 +56,16 @@ def test_parse_device_status_0xdb():
     payload[5] = 0xEE  # mac[4]
     payload[6] = 0xDD  # mac[3]
     payload[7] = 0xCC  # mac[2]
-    payload[8] = 0x05  # routing_metric
-    payload[9] = 0x01  # on_state = ON
+    payload[8] = 0x05  # ttc
+    payload[9] = 0x01  # hops = 1 (one relay away)
 
     n = Notification(source=0x007D, opcode=0xDB, vendor=0x0211, payload=bytes(payload))
     ds = parse_device_status(n)
 
     assert ds.address == 0x007D
-    assert ds.is_on is True
+    assert ds.is_on is None  # 0xDB does not encode on/off
+    assert ds.ttc == 0x05
+    assert ds.hops == 0x01
     assert ds.type == 0x16
     assert ds.stype == 0x0C
     assert ds.status_byte == 0x47
@@ -75,18 +77,22 @@ def test_parse_device_status_0xdb():
     assert ds.mac[4] == 0xEE
 
 
-def test_parse_device_status_0xdb_off():
+def test_parse_device_status_0xdb_gateway_self_reply():
+    """0xDB self-reply from the gateway: hops = 0."""
     payload = bytearray(10)
     payload[1] = 0x16  # type
     payload[2] = 0x0C  # stype
     payload[3] = 0x45  # status_byte — online, no alarmDev, version 0x11
-    payload[9] = 0x00  # OFF
+    payload[8] = 0x00  # ttc
+    payload[9] = 0x00  # hops = 0 (gateway self)
 
     n = Notification(source=0x0002, opcode=0xDB, vendor=0x0211, payload=bytes(payload))
     ds = parse_device_status(n)
 
     assert ds.address == 0x0002
-    assert ds.is_on is False
+    assert ds.is_on is None  # 0xDB does not encode on/off
+    assert ds.hops == 0
+    assert ds.ttc == 0
     assert ds.status_byte == 0x45
     assert ds.status_flags is not None
     assert ds.status_flags.alarm_dev is False

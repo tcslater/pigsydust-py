@@ -295,7 +295,9 @@ sno(3) || tag(2) || ciphertext(N)
 
 - **`sno`** (3 bytes): sequence number. Byte 0 is a per-command counter that
   increments by 1 for each command sent. Bytes 1-2 are a per-session salt
-  (random, fixed at login time for the session).
+  (random, fixed at login time for the session). The combined 3-byte `sno`
+  MUST NOT be `0x000000` — the all-zero value is reserved and may be
+  dropped by peers. Seed the counter with `0x01` or higher at login.
 - **`tag`** (2 bytes): truncated CBC-MAC authentication tag.
 - **`ciphertext`** (N bytes): encrypted payload. Length depends on the
   command (typically 15 bytes for on/off, 10 bytes for status queries, etc.).
@@ -450,6 +452,11 @@ prefer `0xe7` for group toggles.
 - Bytes `[0-1]` of data are session-variable (firmware is indifferent)
 - Bytes `[2-4]` are the fixed tag `d7 69 00`
 - **10-byte plaintext** (shorter than the standard 15)
+- **Pixie-specific**: on stock Telink firmware the `0xdc` burst is enabled
+  by subscribing to the notify characteristic (handle `0x0012`) and
+  writing `0x01` to it; `0xc5` as a status-query opcode is layered on
+  top by Pixie/SAL. The same opcode is reused for SetUTC elsewhere in
+  this doc — behaviour depends on destination and payload.
 
 #### 0xda — Status Poll (unicast or broadcast)
 
@@ -477,8 +484,15 @@ dst(2 LE) || 0xda || 11 02 || 10 00
 | 5 | `stype` — wire-level device class sub-identifier (halved) |
 | 6 | Packed status byte — same layout as advert byte 8 (bit 0 = online, bit 1 = alarmDev, bits 2-7 = firmware version). |
 | 7-10 | Source MAC bytes `[5,4,3,2]` |
-| 11 | Mesh routing metric (variable per-frame, likely hop count) |
-| 12 | On/off state: `0x00` = off, `0x01` = on |
+| 11 | `ttc` — time-to-cost relay-quality metric (see encoding below) |
+| 12 | `hops` — relay count from the connected gateway (`0x00` = gateway itself, `0x01` = one relay away, …) |
+
+**`ttc` byte encoding (byte 11).** The byte is packed:
+
+- Bits 7-6: unit selector — `00` = 1 ms, `01` = 4 ms, `10` = 16 ms, `11` = 256 ms.
+- Bits 5-0: magnitude (0-63) in the selected unit.
+
+Examples: `0x16` (`00 010110`) = 22 ms; `0x47` (`01 000111`) = 28 ms.
 
 #### 0xdc — Device Status Notification
 
@@ -497,14 +511,17 @@ in a 4-byte-per-device packed format.
 | 0 | `0xdc` (opcode) |
 | 1-2 | `0x11 0x02` (vendor) |
 | 3 | Device A: mesh address (low byte = MAC[5]) |
-| 4 | Device A: routing metric (`0x00` = unreachable) |
+| 4 | Device A: `sno` — mesh serial number (`0x00` = offline / unreachable) |
 | 5 | Device A: brightness (`0x00` = off, `0x64` = on at 100%) |
-| 6 | Device A: flags |
+| 6 | Device A: customer-reserved byte (Pixie firmware packs the same status-byte layout as advert byte 8 here) |
 | 7 | Device B: mesh address (`0x00` if absent) |
-| 8 | Device B: routing metric |
+| 8 | Device B: `sno` |
 | 9 | Device B: brightness |
-| 10 | Device B: flags |
+| 10 | Device B: customer-reserved |
 | 11-12 | `0x00 0x00` (padding) |
+
+The `sno` slot is semantically distinct from the `ttc` value in `0xdb`:
+`sno == 0` signals an offline device, not a timing measurement.
 
 **Broadcast burst**: a mesh with N devices produces ceil(N/2)
 notifications, each carrying two device statuses. Triggered by `0xc5`
@@ -782,6 +799,28 @@ dst(2 LE) || 0xd0 || 69 69 || frag_index(1) || compressed_sun_data[8]
 - Fragment 2 has an XOR checksum as the trailing byte
 - Payload contains day-of-epoch and compressed astronomical data
 
+### Node Kick-out (0xe3)
+
+```
+dst(2 LE) || 0xe3 || 11 02 || <payload>
+```
+
+- Removes the target node from the current mesh.
+- Kick-out also resets the target's mesh name and password to factory
+  defaults, so the node immediately starts advertising under the
+  provisioning mesh again.
+- The sending client loses visibility of that node on the current mesh
+  until it is re-provisioned.
+
+### Factory Reset via Power Sequence
+
+When a node is unreachable (credentials lost, bricked out of its
+mesh) it can be reset to factory defaults without mesh access by
+cycling mains power in a short/long pattern: **three short cycles
+followed by two long cycles**. Approximate timings: short ≈ 1 s off /
+1 s on, long ≈ 3 s off / 3 s on. On completion the node drops back
+to the provisioning mesh and can be re-paired.
+
 ---
 
 ## Schedule Record Format
@@ -1051,6 +1090,18 @@ Immediately after login, the client should:
    [CHAR_NOTIFY subscription (non-standard)](#char_notify-subscription-non-standard)
 2. Send `0xc5` SetUTC time sync broadcast
 3. Optionally send `0xda` status polls to populate device state
+
+**Online-status priming (recommended).** Trigger the online-status
+burst **three times at ~500 ms intervals** immediately after
+subscribing. A single poll can race other mesh traffic and miss
+devices on cold start.
+
+### Mesh Timing Budget
+
+Per-hop relay delay is on the order of a few milliseconds, so
+whole-mesh command propagation stays below ~100 ms even on multi-hop
+topologies. After a broadcast, wait ≥100 ms before polling state;
+expect unicast status replies within tens of ms per hop.
 
 ### Reconnection
 
