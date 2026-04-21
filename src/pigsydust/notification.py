@@ -13,12 +13,28 @@ from .device_class import device_class_name
 
 @dataclass
 class DeviceStatus:
-    """Decoded status of a mesh device."""
+    """Decoded status of a mesh device.
+
+    ``is_on`` is only populated by the 0xDC (broadcast) path, where the
+    brightness byte is non-zero. The 0xDB (unicast poll) response does
+    **not** encode on/off — byte[9] is the mesh ``hops`` count, not a
+    state flag — so the 0xDB parser leaves ``is_on`` as ``None``.
+
+    ``ttc`` is Telink's "time to cost" relay-quality metric (byte[8] of
+    0xDB). ``hops`` is the relay count from gateway (0 = gateway itself,
+    1 = one relay away, …) and is only present for 0xDB.
+
+    ``sno`` is the mesh serial-number byte carried by each 0xDC device
+    slot (byte[1]) — ``0x00`` means the device is currently unreachable
+    / offline. Only populated on the 0xDC path.
+    """
 
     address: int
-    is_on: bool
     mac: bytes
-    routing_metric: int = 0
+    is_on: bool | None = None
+    ttc: int = 0
+    hops: int | None = None
+    sno: int | None = None
     type: int | None = None
     stype: int | None = None
     status_byte: int | None = None
@@ -82,11 +98,18 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     wire header.  Payload format (10 bytes after opcode+vendor)::
 
         padding(1) || type(1) || stype(1) || status_byte(1) ||
-        mac[5:4:3:2](4) || routing_metric(1) || on_off(1)
+        mac[5:4:3:2](4) || ttc(1) || hops(1)
 
     ``type`` and ``stype`` are the wire-halved device-class identifiers
     (same encoding as advert bytes 6-7). ``status_byte`` is the packed
-    status byte (same layout as advert byte 8).
+    status byte (same layout as advert byte 8). ``ttc`` is Telink's
+    "time to cost" relay-quality metric; ``hops`` is the relay count
+    from the connected gateway (0 = gateway itself).
+
+    The on/off state is **not** encoded in this payload — the field
+    historically labelled ``on_off`` is in fact ``hops`` per Telink
+    SDK manual §6.9, verified against live hardware. ``is_on`` on the
+    returned :class:`DeviceStatus` is therefore ``None``.
     """
     if n.opcode != OP_STATUS_POLL_RESP:
         raise ValueError(f"expected opcode 0xDB, got 0x{n.opcode:02X}")
@@ -102,9 +125,9 @@ def parse_device_status(n: Notification) -> DeviceStatus:
     status_byte = n.payload[3]
     return DeviceStatus(
         address=n.source,
-        is_on=n.payload[9] != 0,
         mac=bytes(mac),
-        routing_metric=n.payload[8],
+        ttc=n.payload[8],
+        hops=n.payload[9],
         type=n.payload[1],
         stype=n.payload[2],
         status_byte=status_byte,
@@ -121,12 +144,19 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
 
     Payload layout (10 bytes after opcode+vendor)::
 
-        dev_a_addr(1) || dev_a_metric(1) || dev_a_brightness(1) || dev_a_flags(1) ||
-        dev_b_addr(1) || dev_b_metric(1) || dev_b_brightness(1) || dev_b_flags(1) ||
+        dev_a_addr(1) || dev_a_sno(1)  || dev_a_brightness(1) || dev_a_flags(1) ||
+        dev_b_addr(1) || dev_b_sno(1)  || dev_b_brightness(1) || dev_b_flags(1) ||
         padding(2)
 
+    Per Telink SDK §6.9 the second byte in each slot is ``sno`` — the
+    mesh serial number for the device — and ``sno == 0`` signals that
+    the device is currently offline/unreachable. The fourth byte is
+    labelled "customer reserved" in the Telink reference; Pixie
+    firmware uses it as the same packed status byte as advert byte 8.
+
     The on/off state is inferred from the brightness byte (0x00 = off,
-    non-zero = on).  This is tentative and may need refinement.
+    non-zero = on). That mapping is still tentative for Pixie
+    specifically — it holds in practice but is not quoted from Telink.
     """
     if n.opcode != OP_STATUS_BROADCAST_RESP:
         raise ValueError(f"expected opcode 0xDC, got 0x{n.opcode:02X}")
@@ -138,7 +168,7 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
         addr = n.payload[offset]
         if addr == 0:
             continue  # skip empty slot
-        metric = n.payload[offset + 1]
+        sno = n.payload[offset + 1]
         brightness = n.payload[offset + 2]
         flags = n.payload[offset + 3]
 
@@ -146,7 +176,7 @@ def parse_device_status_broadcast(n: Notification) -> list[DeviceStatus]:
             address=addr,
             is_on=brightness != 0,
             mac=bytes(6),  # not available in 0xDC format
-            routing_metric=metric,
+            sno=sno,
             status_byte=flags,
             status_flags=StatusByteFlags.from_byte(flags),
         ))
