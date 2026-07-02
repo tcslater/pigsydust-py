@@ -63,6 +63,22 @@ def _format_mac(mac: bytes) -> str:
     return ":".join(f"{b:02X}" for b in mac)
 
 
+def _hci_index_from_adapter(adapter: str | None) -> int:
+    """Map a BlueZ adapter name (e.g. "hci1") to the integer index used to
+    bind the raw HCI notification socket. ``None`` → 0 (the default hci0)."""
+    if not adapter:
+        return 0
+    name = adapter.strip()
+    if name.startswith("hci"):
+        name = name[len("hci"):]
+    try:
+        return int(name)
+    except ValueError as err:
+        raise ValueError(
+            f"pigsydust: invalid adapter {adapter!r}; expected e.g. 'hci1'"
+        ) from err
+
+
 class PixieClient:
     """Manages an authenticated session with a Pixie BLE mesh.
 
@@ -85,6 +101,7 @@ class PixieClient:
         self,
         ble_address: str,
         disconnect_callback: Callable[[], None] | None = None,
+        adapter: str | None = None,
     ) -> None:
         self._address = ble_address
         self._client: BleakClient | None = None
@@ -101,6 +118,11 @@ class PixieClient:
         self._firmware_version: str | None = None
         self._hardware_version: str | None = None
         self._hci_sock = None  # raw HCI socket for notification capture
+        # BlueZ adapter to use, e.g. "hci1". None → system default (hci0).
+        # The BleakClient (GATT) and the raw HCI notify socket MUST target
+        # the same controller, so this one setting feeds both.
+        self._adapter = adapter
+        self._hci_index = _hci_index_from_adapter(adapter)
 
     @property
     def is_connected(self) -> bool:
@@ -180,6 +202,7 @@ class PixieClient:
             self._client = BleakClient(
                 self._address,
                 disconnected_callback=self._on_ble_disconnect,
+                adapter=self._adapter,
             )
 
             # Extract MAC from address (on Linux the address IS the MAC).
@@ -558,7 +581,7 @@ class PixieClient:
             sock = socket.socket(
                 socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI
             )
-            sock.bind((0,))  # hci0
+            sock.bind((self._hci_index,))  # hci<index>, per self._adapter
 
             # HCI filter: accept ACL data packets (type 2)
             # struct hci_filter { type_mask(4), event_mask(8), opcode(2), pad(2) }
@@ -611,7 +634,9 @@ class PixieClient:
 
         loop.add_reader(sock.fileno(), _on_hci_readable)
         _LOGGER.info(
-            "HCI notification reader active (value_handle=%d)", value_handle
+            "HCI notification reader active on hci%d (value_handle=%d)",
+            self._hci_index,
+            value_handle,
         )
 
     def _on_notification_raw(self, data: bytearray) -> None:
